@@ -1,0 +1,84 @@
+{
+  "profileLabel": "AI科研与工程生产力",
+  "projectLimit": 18,
+  "paperLimit": 5,
+  "modelLimit": 4,
+  "newsLimit": 5,
+  "deduplicateDays": 7,
+  "activeWithinDays": 180,
+  "excludeTerms": ["crypto trading", "stock trading", "trading bot", "forex", "casino", "airdrop", "炒股", "加密货币交易"],
+  "aiTerms": ["ai", "llm", "large language model", "agent", "neural", "machine learning", "deep learning", "generative", "人工智能", "大模型", "智能体"],
+  "toolTerms": ["tool", "toolkit", "framework", "assistant", "automation", "workflow", "sdk", "plugin", "mcp", "agent", "skills", "工具", "助手", "自动化", "工作流"],
+  "categories": [
+    {
+      "id": "research",
+      "label": "科研效率与知识工具",
+      "quota": 2,
+      "minimumScore": 5,
+      "terms": {"research assistant": 7, "scientific research": 6, "literature review": 7, "paper reading": 6, "academic": 4, "scientific": 3, "research workflow": 6, "zotero": 5, "latex": 4, "jupyter": 3, "notebook": 2, "knowledge management": 5, "科研": 5, "文献": 5, "论文阅读": 6}
+    },
+    {
+      "id": "ai_tools",
+      "label": "AI编程、Skills、MCP与插件",
+      "quota": 4,
+      "minimumScore": 5,
+      "terms": {"mcp": 6, "model context protocol": 8, "agent skills": 7, "coding agent": 7, "coding assistant": 7, "ai coding": 7, "code generation": 6, "claude code": 6, "codex": 5, "developer tools": 3, "plugin": 3, "agent framework": 5, "agentic": 4, "智能体": 4, "编程助手": 7, "技能": 3}
+    },
+    {
+      "id": "models",
+      "label": "大模型、多模态与推理工具",
+      "quota": 2,
+      "minimumScore": 5,
+      "terms": {"llm": 3, "large language model": 5, "multimodal": 5, "vision language": 5, "inference": 3, "fine tuning": 4, "quantization": 4, "vllm": 5, "llama.cpp": 5, "reasoning model": 5, "language model": 4, "大模型": 5, "多模态": 5, "推理引擎": 5}
+    },
+    {
+      "id": "vision_3d",
+      "label": "视觉、导航与三维重建生成",
+      "quota": 3,
+      "minimumScore": 5,
+      "terms": {"computer vision": 5, "3d reconstruction": 7, "3d generation": 7, "gaussian splatting": 7, "neural rendering": 6, "nerf": 6, "photogrammetry": 6, "image matching": 7, "feature matching": 6, "visual localization": 6, "visual odometry": 6, "slam": 6, "depth estimation": 5, "point cloud": 5, "sfm": 5, "lidar": 4, "三维重建": 7, "三维生成": 7, "图像匹配": 6, "视觉导航": 6}
+    },
+    {
+      "id": "embodied",
+      "label": "具身智能、机器人与无人机",
+      "quota": 2,
+      "minimumScore": 5,
+      "terms": {"embodied": 7, "robotics": 5, "robot learning": 7, "vision language action": 7, "vla": 5, "ros2": 5, "manipulation": 4, "drone": 5, "uav": 5, "autonomous navigation": 6, "sim2real": 6, "具身智能": 7, "机器人": 5, "无人机": 5}
+    },
+    {
+      "id": "creative_sim",
+      "label": "Blender、UE、CAD与仿真",
+      "quota": 2,
+      "minimumScore": 5,
+      "terms": {"blender": 6, "unreal engine": 6, "ue5": 5, "solidworks": 7, "cad": 4, "text to cad": 8, "text to 3d": 6, "animation": 3, "physics simulation": 5, "simulation engine": 5, "isaac sim": 7, "mujoco": 6, "digital twin": 5, "3d modeling": 5, "仿真": 5, "动画生成": 6, "建模": 3}
+    },
+    {
+      "id": "hardware",
+      "label": "FPGA、电路芯片与嵌入式",
+      "quota": 2,
+      "minimumScore": 5,
+      "terms": {"fpga": 7, "verilog": 7, "systemverilog": 7, "rtl": 5, "eda": 5, "chip design": 7, "circuit design": 7, "pcb": 5, "kicad": 6, "embedded": 5, "stm32": 6, "esp32": 5, "risc v": 5, "hls": 5, "hardware design": 6, "嵌入式": 6, "电路设计": 7, "芯片设计": 7}
+    },
+    {
+      "id": "measurement",
+      "label": "光电、精密测量与信号工具",
+      "quota": 1,
+      "minimumScore": 5,
+      "terms": {"photonics": 7, "optoelectronics": 7, "interferometry": 7, "spectroscopy": 6, "oscilloscope": 6, "lock in amplifier": 7, "signal processing": 5, "precision measurement": 7, "optical design": 6, "optical simulation": 6, "光电": 7, "精密测量": 7, "信号处理": 5, "光学设计": 6}
+    }
+  ],
+  "searchQueries": [
+    {"label": "科研效率", "query": "\"research assistant\" in:name,description stars:>=10", "sort": "updated"},
+    {"label": "AI编程", "query": "\"coding agent\" in:name,description stars:>=20", "sort": "updated"},
+    {"label": "MCP工具", "query": "topic:mcp stars:>=30", "sort": "updated"},
+    {"label": "Agent Skills", "query": "\"agent skills\" in:name,description stars:>=20", "sort": "updated"},
+    {"label": "大模型", "query": "topic:llm stars:>=50", "sort": "updated"},
+    {"label": "三维视觉", "query": "\"3d reconstruction\" OR \"gaussian splatting\" in:name,description stars:>=15", "sort": "updated"},
+    {"label": "导航匹配", "query": "slam OR \"image matching\" in:name,description stars:>=15", "sort": "updated"},
+    {"label": "机器人", "query": "topic:robotics stars:>=20", "sort": "updated"},
+    {"label": "创作仿真", "query": "blender OR solidworks OR \"unreal engine\" in:name,description stars:>=15", "sort": "updated"},
+    {"label": "硬件设计", "query": "fpga OR verilog OR \"circuit design\" in:name,description stars:>=15", "sort": "updated"},
+    {"label": "嵌入式", "query": "embedded OR stm32 in:name,description stars:>=20", "sort": "updated"},
+    {"label": "光电测量", "query": "photonics OR interferometry OR oscilloscope in:name,description stars:>=5", "sort": "updated"}
+  ]
+}

@@ -46,8 +46,8 @@ class SendEmailRemoteJobsTests(unittest.TestCase):
         report = self.module.load_remote_jobs_report("/tmp/does-not-exist-remote-jobs.md")
 
         self.assertEqual(report["status"], "ready")
-        self.assertTrue(report["path"].endswith("remote-jobs/daily_remote_jobs_2026-05-13.md"))
-        self.assertEqual(report["requested_path"], "/tmp/does-not-exist-remote-jobs.md")
+        self.assertEqual(Path(report["path"]).name, "daily_remote_jobs_2026-05-13.md")
+        self.assertEqual(Path(report["requested_path"]), Path("/tmp/does-not-exist-remote-jobs.md"))
         self.assertIn("已自动使用最近可用报告", report["fallback_message"])
 
     def test_load_remote_jobs_report_marks_missing_when_no_fallback_exists(self):
@@ -132,7 +132,8 @@ class SendEmailRemoteJobsTests(unittest.TestCase):
 
         html = self.module.format_email(data, report)
 
-        self.assertIn("📦 GitHub Trending - All", html)
+        self.assertNotIn("📦 GitHub Trending - All", html)
+        self.assertIn("📦 Typescript", html)
         self.assertIn("example/repo", html)
         self.assertIn("每日远程岗位推荐 - 2026-05-13", html)
         self.assertIn("https://eleduck.com/posts/82f2d4", html)

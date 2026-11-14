@@ -1,4 +1,5 @@
 # send_email.py
+import argparse
 import base64
 import html
 import json
@@ -9,13 +10,40 @@ import re
 import string
 import sys
 from datetime import datetime
+from urllib.parse import urlsplit
 
-import yagmail
+try:
+    import yagmail
+except ImportError:
+    yagmail = None
 
 def send_email(username, password, recipient, subject, body):
+    if yagmail is None:
+        raise RuntimeError('Install yagmail before sending email.')
+
+    host = os.getenv('SMTP_HOST') or 'smtp.gmail.com'
+    try:
+        port = int(os.getenv('SMTP_PORT') or '465')
+    except ValueError:
+        raise ValueError('SMTP_PORT must be an integer.') from None
+    if not 1 <= port <= 65535:
+        raise ValueError('SMTP_PORT must be between 1 and 65535.')
+    smtp_ssl = parse_bool(os.getenv('SMTP_SSL') or 'true')
+    smtp_starttls = parse_bool(os.getenv('SMTP_STARTTLS') or 'false')
+    if smtp_ssl and smtp_starttls:
+        raise ValueError('SMTP_SSL and SMTP_STARTTLS cannot both be enabled.')
+
     print("Sending email...")
-    yag = yagmail.SMTP(username, password)
-    yag.send(to=recipient, subject=subject, contents=body, prettify_html=False)
+    yag = yagmail.SMTP(
+        username, password, host=host, port=port,
+        smtp_ssl=smtp_ssl, smtp_starttls=smtp_starttls,
+    )
+    try:
+        result = yag.send(to=recipient, subject=subject, contents=body, prettify_html=False)
+        if result is False:
+            raise RuntimeError('SMTP did not confirm email delivery.')
+    finally:
+        yag.close()
     print('Email sent successfully')
 
 def uid():
@@ -205,13 +233,199 @@ def get_github_all_repos(gh):
         if isinstance(repos, list):
             return repos
 
-    for key, repos in gh.items():
-        if isinstance(repos, list):
-            return repos
-
     return []
 
+def _digest_text(value, limit=None):
+    text = ' '.join(str(value if value is not None else '').split())
+    if limit and len(text) > limit:
+        text = text[:limit].rstrip() + '…'
+    return html.escape(text, quote=True)
+
+
+def _digest_url(value):
+    """Allow web links only; never turn scraped values into executable markup."""
+    if not isinstance(value, str) or not value:
+        return None
+    if any(ord(char) < 33 or ord(char) == 127 for char in value) or '\\' in value:
+        return None
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname:
+            return None
+        if parsed.username is not None or parsed.password is not None:
+            return None
+        parsed.port
+    except ValueError:
+        return None
+    return html.escape(value, quote=True)
+
+
+def _digest_link(item):
+    title = _digest_text(item.get('title') or '未命名条目', 150)
+    url = _digest_url(item.get('url'))
+    if url:
+        return f'<a href="{url}" style="color:#1d4ed8;text-decoration:none;word-break:break-word;">{title}</a>'
+    return title
+
+
+def _digest_number(value):
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = int(str(value).replace(',', '').strip())
+    except (TypeError, ValueError):
+        return None
+    return f'{max(0, number):,}'
+
+
+def _digest_reasons(item):
+    reasons = item.get('reasons') or []
+    if not isinstance(reasons, list):
+        return ''
+    labels = [_digest_text(reason, 80) for reason in reasons[:2] if reason]
+    if not labels:
+        return ''
+    return '<p style="margin:8px 0;color:#166534;font-size:13px;line-height:1.6;">匹配方向：' + '；'.join(labels) + '</p>'
+
+
+def _digest_source_labels(values):
+    labels = {
+        'github trending': 'GitHub 热榜', 'github_trending': 'GitHub 热榜',
+        'trending': 'GitHub 热榜', 'github search': 'GitHub 领域搜索',
+        'github_search': 'GitHub 领域搜索', 'search': 'GitHub 领域搜索',
+        'hugging face': 'Hugging Face', 'huggingface': 'Hugging Face',
+        'hugging face models': 'Hugging Face 模型', 'huggingface models': 'Hugging Face 模型',
+        'hf models': 'Hugging Face 模型', 'huggingface_models': 'Hugging Face 模型',
+        'hugging face papers': 'Hugging Face 论文', 'huggingface papers': 'Hugging Face 论文',
+        'hf papers': 'Hugging Face 论文', 'huggingface_papers': 'Hugging Face 论文',
+        'hacker news': 'Hacker News', 'hacker_news': 'Hacker News', 'hn': 'Hacker News',
+        'arxiv': 'arXiv',
+    }
+    if not isinstance(values, list):
+        return []
+    result = []
+    for value in values:
+        label = labels.get(str(value).strip().lower())
+        if label and label not in result:
+            result.append(label)
+    return result
+
+
+def _digest_section(title, cards):
+    return '<h2 style="margin:24px 0 12px;color:#111827;font-size:19px;line-height:1.5;">' + _digest_text(title, 100) + '</h2>' + ''.join(cards)
+
+
+def _digest_card(parts):
+    return '<div style="margin:0 0 12px;padding:16px;border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;">' + ''.join(parts) + '</div>'
+
+
+def render_personalized_digest(digest):
+    """Render a concise digest without an external model or translation service."""
+    if not isinstance(digest, dict):
+        raise ValueError('personalizedDigest must be a JSON object.')
+    categories = digest.get('categories') or []
+    if not isinstance(categories, list):
+        categories = []
+    project_count = sum(len(category.get('projects') or []) for category in categories if isinstance(category, dict) and isinstance(category.get('projects'), list))
+    sections = []
+    for category in categories:
+        if not isinstance(category, dict):
+            continue
+        projects = category.get('projects') or []
+        if not isinstance(projects, list):
+            continue
+        cards = []
+        for project in projects:
+            if not isinstance(project, dict):
+                continue
+            parts = ['<h3 style="margin:0 0 8px;font-size:16px;line-height:1.5;">' + _digest_link(project) + '</h3>']
+            if project.get('description'):
+                parts.append('<p style="margin:0;color:#374151;line-height:1.7;word-break:break-word;">' + _digest_text(project['description'], 260) + '</p>')
+            parts.append(_digest_reasons(project))
+            metadata = []
+            stars = _digest_number(project.get('stars'))
+            today = _digest_number(project.get('starsToday'))
+            if stars is not None:
+                metadata.append('总 Stars ' + stars)
+            if today is not None:
+                metadata.append('今日新增 +' + today)
+            if project.get('language'):
+                metadata.append('语言：' + _digest_text(project['language'], 35))
+            if project.get('updatedAt'):
+                metadata.append('更新：' + _digest_text(str(project['updatedAt'])[:10]))
+            sources = _digest_source_labels(project.get('sources'))
+            if sources:
+                metadata.append('来源：' + '、'.join(sources))
+            if metadata:
+                parts.append('<p style="margin:10px 0 0;color:#6b7280;font-size:12px;line-height:1.8;">' + ' · '.join(metadata) + '</p>')
+            cards.append(_digest_card(parts))
+        if cards:
+            sections.append(_digest_section(category.get('label') or '相关项目', cards))
+    if not sections:
+        sections.append('<p style="line-height:1.8;color:#4b5563;">本期暂未找到符合关注方向的新项目。</p>')
+
+    for key, heading, limit in (('papers', '相关论文', 5), ('models', '相关模型', 4), ('news', '相关科技动态', 5)):
+        items = digest.get(key) or []
+        if not isinstance(items, list):
+            continue
+        cards = []
+        for item in items[:limit]:
+            if not isinstance(item, dict):
+                continue
+            parts = ['<h3 style="margin:0 0 8px;font-size:16px;line-height:1.5;">' + _digest_link(item) + '</h3>']
+            description = item.get('summary') if key == 'papers' else item.get('description')
+            if description:
+                parts.append('<p style="margin:0;color:#374151;line-height:1.7;word-break:break-word;">' + _digest_text(description, 230) + '</p>')
+            parts.append(_digest_reasons(item))
+            metadata = []
+            if key == 'papers':
+                authors = item.get('authors') or []
+                if isinstance(authors, list) and authors:
+                    metadata.append('作者：' + _digest_text('、'.join(str(author) for author in authors[:3]), 100))
+                if item.get('publishedAt'):
+                    metadata.append('发表：' + _digest_text(str(item['publishedAt'])[:10]))
+            elif key == 'models':
+                for field, label in (('downloads', '下载'), ('likes', '喜欢')):
+                    number = _digest_number(item.get(field))
+                    if number is not None:
+                        metadata.append(label + ' ' + number)
+            else:
+                score = _digest_number(item.get('score'))
+                if score is not None:
+                    metadata.append('社区热度 ' + score)
+            if metadata:
+                parts.append('<p style="margin:10px 0 0;color:#6b7280;font-size:12px;line-height:1.8;">' + ' · '.join(metadata) + '</p>')
+            cards.append(_digest_card(parts))
+        if cards:
+            sections.append(_digest_section(heading, cards))
+
+    statuses = digest.get('sourceStatus') or []
+    failures = [status for status in statuses if isinstance(status, dict) and status.get('ok') is False] if isinstance(statuses, list) else []
+    source_note = ''
+    if failures:
+        names = _digest_source_labels([status.get('name', '') for status in failures])
+        label = '、'.join(names) if names else '部分来源'
+        # Collector messages may contain diagnostics: publish only fixed status text.
+        source_note = '<p style="margin:12px 0 0;color:#92400e;font-size:12px;line-height:1.7;">来源状态：' + label + '暂不可用，本期展示已成功获取的内容。</p>'
+    return (
+        '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI 科研与工程日报</title></head>'
+        '<body style="margin:0;padding:0;background:#f3f4f6;color:#1f2937;font-family:Arial,\'Microsoft YaHei\',sans-serif;font-size:14px;">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;"><tr><td align="center" style="padding:16px 8px;">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:700px;background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;"><tr><td style="padding:24px 18px;">'
+        '<p style="margin:0 0 8px;color:#6b7280;font-size:12px;">' + _digest_text(digest.get('date'), 30) + '</p>'
+        '<h1 style="margin:0;color:#111827;font-size:25px;line-height:1.5;">' + _digest_text(digest.get('profileLabel') or 'AI 科研与工程生产力', 80) + '</h1>'
+        '<p style="margin:12px 0 20px;color:#4b5563;line-height:1.8;">本期 ' + str(project_count) + ' 个匹配项目。按兴趣主题筛选与去重；项目介绍和论文摘要保留原文。</p>'
+        + ''.join(sections) +
+        '<div style="margin-top:24px;padding-top:14px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;line-height:1.8;">'
+        '<p style="margin:0;">总 Stars 为累计收藏数；今日新增仅在 GitHub 热榜提供数据时显示。领域搜索补充项目可能没有今日增量。</p>'
+        '<p style="margin:6px 0 0;">匹配方向依据你关注的主题与关键词生成，供快速筛选；具体能力与使用条件请查看原链接。</p>'
+        + source_note + '</div></td></tr></table></td></tr></table></body></html>'
+    )
+
+
 def format_email(data, remote_jobs_report=None):
+    if 'personalizedDigest' in data:
+        return render_personalized_digest(data['personalizedDigest'])
     html = f'''<html><body style="font-family:Arial,sans-serif;max-width:900px;margin:0 auto;padding:20px;background:#fafafa;">
 <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:30px;border-radius:12px;margin-bottom:20px;">
 <h1 style="color:#fff;text-align:center;margin:0;">🔥 Tech Trending Daily</h1>
@@ -333,17 +547,44 @@ def format_email(data, remote_jobs_report=None):
     html += '</body></html>'
     return html
 
-if __name__ == '__main__':
-    username = sys.argv[1]
-    password = sys.argv[2]
-    recipient = sys.argv[3]
-    subject = sys.argv[4]
-    data_base64 = sys.argv[5]
-    enable_remote_jobs = parse_bool(sys.argv[6]) if len(sys.argv) > 6 else parse_bool(os.getenv('ENABLE_REMOTE_JOBS'))
-    remote_jobs_path = sys.argv[7] if len(sys.argv) > 7 else os.getenv('REMOTE_JOBS_REPORT_PATH', '')
-    
-    decoded_bytes = base64.urlsafe_b64decode(data_base64)
-    data = json.loads(decoded_bytes.decode('utf-8'))
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='Render or send a trending digest.')
+    # Keep the original positional interface for existing callers. New workflows
+    # pass credentials through environment variables instead of process arguments.
+    for name in ('username', 'password', 'recipient', 'subject', 'data_base64',
+                 'enable_remote_jobs', 'remote_jobs_path'):
+        parser.add_argument(name, nargs='?')
+    parser.add_argument('--dry-run', action='store_true', help='Write HTML without sending email.')
+    parser.add_argument('--output', default=os.getenv('EMAIL_PREVIEW_PATH') or 'output/digest-preview.html')
+    args = parser.parse_args(argv)
+
+    username = args.username or os.getenv('SMTP_USERNAME', '')
+    password = args.password or os.getenv('SMTP_PASSWORD', '')
+    recipient = args.recipient or os.getenv('SMTP_TO', '')
+    subject = args.subject or os.getenv('EMAIL_SUBJECT') or 'Tech Trending Daily'
+    data_file = os.getenv('TRENDING_DATA_FILE')
+    data_base64 = args.data_base64 or os.getenv('TRENDING_DATA', '')
+    if data_file:
+        data = json.loads(Path(data_file).read_text(encoding='utf-8'))
+    elif data_base64:
+        try:
+            decoded_bytes = base64.b64decode(data_base64, altchars=b'-_', validate=True)
+            data = json.loads(decoded_bytes.decode('utf-8'))
+        except (ValueError, UnicodeDecodeError):
+            raise ValueError('TRENDING_DATA must contain base64-encoded JSON.') from None
+    else:
+        raise ValueError('Set TRENDING_DATA_FILE or TRENDING_DATA before rendering a digest.')
+    if not isinstance(data, dict):
+        raise ValueError('Trending data must be a JSON object.')
+
+    enable_remote_jobs = parse_bool(
+        args.enable_remote_jobs if args.enable_remote_jobs is not None
+        else os.getenv('ENABLE_REMOTE_JOBS')
+    )
+    remote_jobs_path = (
+        args.remote_jobs_path if args.remote_jobs_path is not None
+        else os.getenv('REMOTE_JOBS_REPORT_PATH', '')
+    )
     remote_jobs_report = None
     if enable_remote_jobs:
         remote_jobs_report = load_remote_jobs_report(remote_jobs_path)
@@ -351,7 +592,23 @@ if __name__ == '__main__':
 
     content = format_email(data, remote_jobs_report)
     
-    # Print size for debugging
-    print(f"Email HTML size: {len(content)} bytes ({len(content)/1024:.1f} KB)")
-    
+    content_size = len(content.encode('utf-8'))
+    print(f"Email HTML size: {content_size} bytes ({content_size/1024:.1f} KB)")
+    if args.dry_run:
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(content, encoding='utf-8')
+        print(f'Dry run complete. Preview: {output_path}')
+        return 0
+
+    missing = [name for name, value in (
+        ('SMTP_USERNAME', username), ('SMTP_PASSWORD', password), ('SMTP_TO', recipient)
+    ) if not value]
+    if missing:
+        raise ValueError('Missing email settings: ' + ', '.join(missing))
     send_email(username, password, recipient, subject, content)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

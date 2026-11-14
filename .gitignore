@@ -131,3 +131,6 @@ dist
 
 # Test output
 test-output/
+output/
+__pycache__/
+*.py[cod]
