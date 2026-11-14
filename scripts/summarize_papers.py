@@ -51,11 +51,24 @@ def prompt_messages(context, profile):
             {'role': 'user', 'content': json.dumps(supplied, ensure_ascii=False)}]
 
 
-def numeric_tokens(text):
-    # Whole numeric tokens, with ordinary formatting normalized. Ignore 3D,
-    # GPT-4 and similar names; do not confuse 10 with a substring of 100.
-    tokens = re.findall(r'(?<![A-Za-z0-9_.-])[+-]?\d+(?:,\d{3})*(?:\.\d+)?(?![A-Za-z0-9_])', text)
-    return {Decimal(token.replace(',', '')) for token in tokens}
+def numeric_tokens(text, include_model_parameters=False):
+    # Normalize actual quantities, not digits embedded in 3D/GPT-4/model names.
+    # Complete suffix boundaries keep 10km and 4KB from becoming 10k and 4K.
+    multipliers = {'k': 1000, 'm': 1000000, 'b': 1000000000,
+                   '千': 1000, '万': 10000, '亿': 100000000,
+                   '百万': 1000000, '千万': 10000000, '万亿': 1000000000000}
+    number = r'[+-]?\d+(?:,\d{3})*(?:\.\d+)?'
+    unit = r'[kKmMbB]|百万|千万|万亿|千|万|亿'
+    pattern = (r'(?<![A-Za-z0-9_.^\-])(' + number + r')(?:\s*(' + unit + r'))?'
+               r'(?![A-Za-z0-9_]|[.,]\d)')
+    tokens = {Decimal(value.replace(',', '')) * multipliers.get(suffix.lower(), 1)
+              for value, suffix in re.findall(pattern, text)}
+    if include_model_parameters:
+        # A source model name such as Agent-R^2-4B supports mentioning its 4B
+        # size separately. GPT-4 never supplies an experimental quantity of 4.
+        for value in re.findall(r'(?<=[A-Za-z0-9_])-(\d+(?:\.\d+)?)[Bb](?![A-Za-z0-9_])', text):
+            tokens.add(Decimal(value) * multipliers['b'])
+    return tokens
 
 
 def validate_summary(raw, context):
@@ -72,7 +85,8 @@ def validate_summary(raw, context):
     disclosure = re.sub(r'(?:未|没有|并未)\s*(?:' + claims + ')', '', text)
     if re.search(claims, disclosure):
         raise AnalysisError('论文介绍包含未经支持的全文阅读或实验声明')
-    if not numeric_tokens(text).issubset(numeric_tokens(context['title'] + '\n' + context['abstract'])):
+    if not numeric_tokens(text).issubset(numeric_tokens(context['title'] + '\n' + context['abstract'],
+                                                       include_model_parameters=True)):
         raise AnalysisError('论文介绍包含来源未出现的数字')
     if context['source'] == 'title' and not text.startswith('仅依据标题'):
         text = '仅依据标题：' + text
@@ -149,7 +163,7 @@ def unavailable(context):
     return {'status': 'unavailable', 'source': context['source'], 'message': UNAVAILABLE}
 
 
-def summarize_paper(paper, profile, key, model, cache_dir, deadline):
+def summarize_paper(paper, profile, key, model, cache_dir, deadline, log_index=None):
     context = paper_context(paper)
     usage = {'prompt_tokens': 0, 'completion_tokens': 0}
     try:
@@ -169,6 +183,8 @@ def summarize_paper(paper, profile, key, model, cache_dir, deadline):
             pass  # Cache availability never discards a valid paid result.
         return analysis, usage, False
     except AnalysisError as exc:
+        # Only our fixed, sanitized errors go to action logs, never model text.
+        print(f'Paper summary {log_index or "?"}: unavailable: {exc}', flush=True)
         return unavailable(context), exc.usage or usage, False
 
 
@@ -188,7 +204,7 @@ def summarize_digest(data, profile, key, model, cache_dir):
         paper['chineseSummary'] = unavailable(paper_context(paper))
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {executor.submit(summarize_paper, paper, profile, key, model,
-                                  paper_cache, deadline): index
+                                  paper_cache, deadline, index + 1): index
                    for index, paper in enumerate(papers[:MAX_PAPERS])}
         for future in as_completed(futures):
             index = futures[future]

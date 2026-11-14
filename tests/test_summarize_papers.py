@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 import importlib.util
 import json
 from pathlib import Path
@@ -76,6 +77,27 @@ class SummarizePaperTests(unittest.TestCase):
             papers.validate_summary({'summary': summary.replace('1000', '100')}, context)
         self.assertEqual(papers.numeric_tokens('3D GPT-4'), set())
 
+    def test_numeric_quantities_normalize_english_and_chinese_unit_suffixes(self):
+        for spellings, expected in ((['4k', '4000', '4千', '0.4万'], 4000),
+                                    (['10k', '10000', '1万'], 10000),
+                                    (['1.2M', '1200000', '120万'], 1200000),
+                                    (['4B', '4000000000', '40亿'], 4000000000),
+                                    (['-1.5k', '-1500', '-0.15万'], -1500)):
+            for text in spellings:
+                with self.subTest(text=text):
+                    self.assertEqual(papers.numeric_tokens(text), {Decimal(expected)})
+        self.assertEqual(papers.numeric_tokens('3D GPT-4 Qwen3-235B 10km 4KB'), set())
+        self.assertEqual(papers.numeric_tokens('Agent-R^2-4B Qwen3-235B GPT-4',
+                         include_model_parameters=True), {Decimal(4000000000), Decimal(235000000000)})
+        context = papers.paper_context(paper(title='Agent-R^2-4B',
+            summary='We use a 10k web corpus and 4k training instances and achieve 51.0% accuracy.'))
+        valid = ('作者报告使用1万条网络语料和4000个训练实例构建训练数据，并得到4B模型。'
+                 '摘要报告准确率为51%，但尚不能据此推断其他场景的表现，具体评测仍需核对原文。')
+        self.assertEqual(papers.validate_summary({'summary': valid}, context)['summary'], valid)
+        for invented in (valid.replace('4000', '40000'), valid.replace('1万', '2万')):
+            with self.subTest(invented=invented), self.assertRaisesRegex(papers.AnalysisError, '数字'):
+                papers.validate_summary({'summary': invented}, context)
+
     def test_request_uses_shared_fixed_endpoint_and_bounded_json(self):
         context = papers.paper_context(paper())
         with patch.object(papers, 'request_json', return_value=response()) as request:
@@ -144,6 +166,17 @@ class SummarizePaperTests(unittest.TestCase):
             self.assertEqual(missing_key['personalizedDigest']['paperSummaryStatus']['failed'], 2)
         self.assertEqual(source, original)
         self.assertEqual(result['githubTrending'], original['githubTrending'])
+
+    def test_failure_reason_is_logged_without_entering_paper_fields(self):
+        data = {'personalizedDigest': {'papers': [paper()]}}
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(papers, 'invoke_model', side_effect=papers.AnalysisError('论文介绍包含来源未出现的数字')), \
+                    patch('builtins.print') as output:
+                result = papers.summarize_digest(data, PROFILE, 'not-a-real-key', papers.MODEL, Path(folder))
+        output.assert_called_once_with('Paper summary 1: unavailable: 论文介绍包含来源未出现的数字', flush=True)
+        summary = result['personalizedDigest']['papers'][0]['chineseSummary']
+        self.assertEqual(summary['message'], papers.UNAVAILABLE)
+        self.assertNotIn('数字', json.dumps(summary, ensure_ascii=False))
 
     def test_cache_reuses_valid_results_and_invalidates_inputs(self):
         context = papers.paper_context(paper())
