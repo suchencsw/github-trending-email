@@ -98,6 +98,26 @@ class PersonalizedEmailTests(unittest.TestCase):
         for expected in ('相关论文</h2>', 'Original abstract.', '作者：Alice、Bob', '相关模型</h2>', '下载 3,000', '喜欢 12', '相关科技动态</h2>', '社区热度 42'):
             self.assertIn(expected, output)
 
+    def test_supplementary_groups_each_show_at_most_five_real_items(self):
+        for kind in ('papers', 'models', 'news'):
+            self.digest[kind] = [None] + [
+                {'title': kind + '-item-' + str(index), 'url': 'https://example.org/' + kind + '/' + str(index)}
+                for index in range(7)
+            ]
+        output = self.render()
+        for kind in ('papers', 'models', 'news'):
+            self.assertIn(kind + '-item-4</a>', output)
+            self.assertNotIn(kind + '-item-5', output)
+            self.assertNotIn(kind + '-item-6', output)
+        self.assertIn('本期 1 个匹配项目', output)
+
+    def test_repository_metadata_source_is_not_labeled_trending_or_search(self):
+        self.digest['categories'][0]['projects'][0]['sources'] = ['GitHub Repository']
+        output = self.render()
+        self.assertIn('来源：GitHub 仓库资料', output)
+        self.assertNotIn('来源：GitHub 热榜', output)
+        self.assertNotIn('来源：GitHub 领域搜索', output)
+
     def test_legacy_data_retains_legacy_renderer(self):
         output = email.format_email({})
         self.assertIn('Tech Trending Daily', output)

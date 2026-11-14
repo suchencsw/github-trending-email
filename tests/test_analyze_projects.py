@@ -252,6 +252,43 @@ class AnalyzeProjectTests(unittest.TestCase):
         self.assertEqual(output['githubTrending']['personalized'][0]['title'], 'lab/high')
         self.assertEqual(len(output['githubTrending']['personalized']), 1)
 
+    def test_all_nine_domains_allow_five_without_old_global_cap(self):
+        categories = [{'id': f'domain{i}', 'label': f'领域{i}', 'quota': 9} for i in range(9)]
+        profile = {**PROFILE, 'projectLimit': 45, 'categories': categories}
+        candidates = [{**analyzed(f'lab/domain{i}-tool{j}', relevanceScore=90-j),
+                       'category': f'domain{i}'} for i in range(9) for j in range(7)]
+        output, next_state = analyze.finalize(digest(), candidates, profile, {'lastSent': {}},
+            analyze.MODEL, {'prompt_tokens': 0, 'completion_tokens': 0}, TODAY)
+        groups = output['personalizedDigest']['categories']
+        self.assertEqual([len(group['projects']) for group in groups], [5] * 9)
+        self.assertEqual(output['personalizedDigest']['stats']['selected'], 45)
+        self.assertEqual(len(next_state['lastSent']), 45)
+
+    def test_stricter_relevance_gate_leaves_group_unfilled_and_state_untouched(self):
+        profile = {**PROFILE, 'projectLimit': 5,
+                   'categories': [{**PROFILE['categories'][0], 'quota': 5}]}
+        candidates = [analyzed('lab/useful', relevanceScore=80),
+                      analyzed('lab/borderline', relevanceScore=69.99),
+                      analyzed('lab/rejected', eligible=False)]
+        output, next_state = analyze.finalize(digest(), candidates, profile, {'lastSent': {}},
+            analyze.MODEL, {'prompt_tokens': 0, 'completion_tokens': 0}, TODAY)
+        self.assertEqual(output['personalizedDigest']['stats']['selected'], 1)
+        self.assertEqual(next_state['lastSent'], {'lab/useful': TODAY.isoformat()})
+
+    def test_candidate_work_is_interleaved_across_all_domains(self):
+        data = {'personalizedDigest': {'categories': [
+            {'id': f'domain{i}', 'projects': [project(f'lab/d{i}-tool{j}') for j in range(20)]}
+            for i in range(9)]}}
+        candidates = analyze.shortlist_projects(data)
+        self.assertEqual(len(candidates), 90)
+        self.assertEqual([item['category'] for item in candidates[:9]], [f'domain{i}' for i in range(9)])
+        self.assertEqual(sum(item['category'] == 'domain8' for item in candidates), 10)
+
+    def test_project_introduction_requires_brief_chinese_function_description(self):
+        for introduction in ('This tool generates FPGA testbenches.', '中' * 201):
+            with self.subTest(introduction=introduction), self.assertRaises(analyze.AnalysisError):
+                analyze.validate_analysis(model_result(summary=introduction), DOCS)
+
     def test_live_state_cannot_be_overwritten(self):
         with self.assertRaisesRegex(analyze.AnalysisError, '独立文件'):
             analyze.main(['--state', 'same.json', '--state-output', 'same.json'])

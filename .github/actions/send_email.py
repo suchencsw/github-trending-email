@@ -293,6 +293,7 @@ def _digest_source_labels(values):
         'github trending': 'GitHub 热榜', 'github_trending': 'GitHub 热榜',
         'trending': 'GitHub 热榜', 'github search': 'GitHub 领域搜索',
         'github_search': 'GitHub 领域搜索', 'search': 'GitHub 领域搜索',
+        'github repository': 'GitHub 仓库资料', 'github_repository': 'GitHub 仓库资料',
         'hugging face': 'Hugging Face', 'huggingface': 'Hugging Face',
         'hugging face models': 'Hugging Face 模型', 'huggingface models': 'Hugging Face 模型',
         'hf models': 'Hugging Face 模型', 'huggingface_models': 'Hugging Face 模型',
@@ -334,20 +335,23 @@ def _project_document_analysis(project):
     documents = analysis.get('documentsRead')
     if isinstance(documents, bool) or not isinstance(documents, int) or documents < 1:
         return ''
+    # The analysis validator requests a complete functional summary within
+    # this bound, so ordinary output is rendered without losing capabilities.
     summary = _analysis_text(analysis.get('summary'), 200)
     if not summary:
         return ''
     parts = [
-        '<p style="margin:0 0 8px;color:#1d4ed8;font-size:12px;line-height:1.6;">AI 文档分析 · 已读取 ' + str(documents) + ' 份 README / 仓库文档片段</p>',
-        '<p style="margin:0;color:#374151;line-height:1.7;word-break:break-word;">' + summary + '</p>',
+        '<p style="margin:0;color:#374151;line-height:1.7;word-break:break-word;"><strong>项目简介：</strong>' + summary + '</p>',
     ]
+    details = []
     for field, label, limit, fallback in (
-        ('useCase', '对你的用途', 180, '资料不足，暂未确定具体接入方式。'),
+        ('useCase', '对你的用途', 140, '资料不足，暂未确定具体接入方式。'),
         ('requirements', '使用条件', 280, '文档未明确，请查看项目说明。'),
-        ('limitations', '限制与待确认', 150, '尚未运行验证，实际效果需自行测试。'),
+        ('limitations', '限制与待确认', 120, '尚未运行验证，实际效果需自行测试。'),
     ):
         text = _analysis_text(analysis.get(field), limit) or fallback
-        parts.append('<p style="margin:7px 0 0;color:#374151;font-size:13px;line-height:1.7;word-break:break-word;"><strong>' + label + '：</strong>' + text + '</p>')
+        details.append('<strong>' + label + '：</strong>' + text)
+    parts.append('<p style="margin:7px 0 0;color:#374151;font-size:13px;line-height:1.7;word-break:break-word;">' + '<br>'.join(details) + '</p>')
     evidence = analysis.get('evidence')
     citations = []
     if isinstance(evidence, list):
@@ -355,14 +359,16 @@ def _project_document_analysis(project):
             if not isinstance(item, dict):
                 continue
             url = _digest_url(item.get('url'))
-            quote = _analysis_text(item.get('quote'), 100)
+            quote = _analysis_text(item.get('quote'), 60)
             if not url or not quote:
                 continue
             citations.append('<a href="' + url + '" style="color:#1d4ed8;text-decoration:none;">文档依据 ' + str(len(citations) + 1) + '</a>：&ldquo;' + quote + '&rdquo;')
             if len(citations) == 2:
                 break
+    evidence_note = 'AI 文档分析 · 已读取 ' + str(documents) + ' 份 README / 仓库文档片段'
     if citations:
-        parts.append('<p style="margin:9px 0 0;color:#6b7280;font-size:12px;line-height:1.7;word-break:break-word;">' + '<br>'.join(citations) + '</p>')
+        evidence_note += '<br>' + '<br>'.join(citations)
+    parts.append('<p style="margin:9px 0 0;color:#6b7280;font-size:12px;line-height:1.7;word-break:break-word;">' + evidence_note + '</p>')
     return ''.join(parts)
 
 
@@ -373,7 +379,7 @@ def render_personalized_digest(digest):
     categories = digest.get('categories') or []
     if not isinstance(categories, list):
         categories = []
-    project_count = sum(len(category.get('projects') or []) for category in categories if isinstance(category, dict) and isinstance(category.get('projects'), list))
+    project_count = 0
     analysis_status = digest.get('analysisStatus')
     analysis_status = analysis_status if isinstance(analysis_status, dict) else {}
     analysis_enabled = analysis_status.get('enabled') is True
@@ -386,10 +392,10 @@ def render_personalized_digest(digest):
         projects = category.get('projects') or []
         if not isinstance(projects, list):
             continue
+        projects = [project for project in projects if isinstance(project, dict)][:5]
+        project_count += len(projects)
         cards = []
         for project in projects:
-            if not isinstance(project, dict):
-                continue
             parts = ['<h3 style="margin:0 0 8px;font-size:16px;line-height:1.5;">' + _digest_link(project) + '</h3>']
             document_analysis = _project_document_analysis(project)
             if document_analysis:
@@ -400,7 +406,7 @@ def render_personalized_digest(digest):
                     fallback_count += 1
                     parts.append('<p style="margin:0 0 8px;color:#92400e;font-size:12px;line-height:1.6;">本项未完成文档分析，仅按关键词初筛。</p>')
                 if project.get('description'):
-                    parts.append('<p style="margin:0;color:#374151;line-height:1.7;word-break:break-word;">' + _digest_text(project['description'], 260) + '</p>')
+                    parts.append('<p style="margin:0;color:#374151;line-height:1.7;word-break:break-word;"><strong>项目简介：</strong>' + _digest_text(project['description'], 260) + '</p>')
             parts.append(_digest_reasons(project))
             metadata = []
             stars = _digest_number(project.get('stars'))
@@ -424,14 +430,12 @@ def render_personalized_digest(digest):
     if not sections:
         sections.append('<p style="line-height:1.8;color:#4b5563;">本期暂未找到符合关注方向的新项目。</p>')
 
-    for key, heading, limit in (('papers', '相关论文', 5), ('models', '相关模型', 4), ('news', '相关科技动态', 5)):
+    for key, heading in (('papers', '相关论文'), ('models', '相关模型'), ('news', '相关科技动态')):
         items = digest.get(key) or []
         if not isinstance(items, list):
             continue
         cards = []
-        for item in items[:limit]:
-            if not isinstance(item, dict):
-                continue
+        for item in [item for item in items if isinstance(item, dict)][:5]:
             parts = ['<h3 style="margin:0 0 8px;font-size:16px;line-height:1.5;">' + _digest_link(item) + '</h3>']
             description = item.get('summary') if key == 'papers' else item.get('description')
             if description:
@@ -471,13 +475,13 @@ def render_personalized_digest(digest):
         introduction = '本期 ' + str(project_count) + ' 个匹配项目，其中 ' + str(analyzed_count) + ' 个完成 AI 文档分析。'
         if fallback_count:
             introduction += str(fallback_count) + ' 个仅按关键词初筛，已单独标注。'
-        introduction += '论文、模型与科技动态仍基于来源信息筛选，介绍和摘要保留原文。'
+        introduction += '每组最多 5 项，宁缺毋滥。论文、模型与科技动态仍基于来源信息筛选，介绍和摘要保留原文。'
         analysis_note = '项目中文分析依据实际读取的 README 与仓库文档片段生成，文档依据可点击核对；未运行项目或验证作者宣称的效果。'
         model = _analysis_text(analysis_status.get('model'), 100)
         if model:
             analysis_note += ' 分析模型：' + model + '。'
     else:
-        introduction = '本期 ' + str(project_count) + ' 个匹配项目。按兴趣主题筛选与去重；项目介绍和论文摘要保留原文。'
+        introduction = '本期 ' + str(project_count) + ' 个匹配项目。每组最多 5 项，宁缺毋滥。按兴趣主题筛选与去重；项目介绍和论文摘要保留原文。'
         analysis_note = '匹配方向依据你关注的主题与关键词生成，供快速筛选；具体能力与使用条件请查看原链接。'
     return (
         '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI 科研与工程日报</title></head>'

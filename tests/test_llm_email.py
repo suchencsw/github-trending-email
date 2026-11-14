@@ -42,7 +42,7 @@ class LLMEmailTests(unittest.TestCase):
     def test_completed_reading_shows_specific_use_and_citations(self):
         output = self.render()
         for expected in ('AI 文档分析 · 已读取 2 份 README / 仓库文档',
-                         '通过智能体辅助设计 FPGA 逻辑。', '对你的用途',
+                         '项目简介：</strong>通过智能体辅助设计 FPGA 逻辑。', '对你的用途',
                          '可用于整理你的 Verilog 仿真与调试流程。', '使用条件',
                          '限制与待确认', '文档依据 1', 'Run Verilog simulations with an agent.',
                          '其中 1 个完成 AI 文档分析', '未运行项目或验证作者宣称的效果',
@@ -51,6 +51,45 @@ class LLMEmailTests(unittest.TestCase):
         self.assertNotIn('Original metadata description.', output)
         self.assertNotIn('项目介绍和论文摘要保留原文', output)
         self.assertNotIn('其中 25 个', output)
+
+    def test_first_project_paragraph_explains_functions_in_complete_chinese(self):
+        summary = '该工具把自然语言需求转为 FPGA 逻辑草案，并组织 Verilog 仿真、波形检查和迭代调试；它还通过 MCP 将这些操作提供给编程智能体。'
+        self.project['llmAnalysis']['summary'] = summary
+        output = self.render()
+        card = output.split('lab/fpga-agent</a></h3>', 1)[1]
+        first_paragraph = card.split('</p>', 1)[0]
+        self.assertIn('<strong>项目简介：</strong>' + summary, first_paragraph)
+        self.assertNotIn('…', first_paragraph)
+        self.assertNotIn('Original metadata description.', first_paragraph)
+
+    def test_every_project_group_caps_at_five_and_counts_only_displayed_items(self):
+        hardware = []
+        for index in range(6):
+            item = copy.deepcopy(self.project)
+            item['title'] = 'lab/hardware-' + str(index)
+            item['url'] = 'https://github.com/' + item['title']
+            hardware.append(item)
+        self.digest['categories'][0]['projects'] = [None] + hardware
+        space_projects = []
+        for index in range(2):
+            item = copy.deepcopy(self.project)
+            item['title'] = 'lab/space-' + str(index)
+            item['url'] = 'https://github.com/' + item['title']
+            item['llmAnalysis']['summary'] = '用于生成深空导航算法的仿真图像。'
+            space_projects.append(item)
+        self.digest['categories'] += [
+            {'id': 'space_sim', 'label': '深空仿真', 'projects': space_projects},
+            {'id': 'empty', 'label': '本期无合适项目的分组', 'projects': []},
+        ]
+        output = self.render()
+        self.assertIn('本期 7 个匹配项目，其中 7 个完成 AI 文档分析', output)
+        self.assertEqual(output.count('项目简介：</strong>'), 7)
+        self.assertIn('lab/hardware-4</a>', output)
+        self.assertNotIn('lab/hardware-5', output)
+        self.assertIn('深空仿真</h2>', output)
+        self.assertIn('lab/space-1</a>', output)
+        self.assertNotIn('本期无合适项目的分组', output)
+        self.assertIn('每组最多 5 项，宁缺毋滥', output)
 
     def test_fallback_is_distinct_and_uses_fixed_message_not_diagnostics(self):
         failed = copy.deepcopy(self.project)

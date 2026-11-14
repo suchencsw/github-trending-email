@@ -128,6 +128,9 @@ def content_matches(text, profile):
     tool_match = any(has_term(text, term) for term in profile.get('toolTerms', []))
     matches = []
     for category in profile['categories']:
+        required = category.get('requiredAnyTerms', [])
+        if required and not any(has_term(text, term) for term in required):
+            continue
         terms = [(term, weight) for term, weight in category['terms'].items() if has_term(text, term)]
         base = sum(weight for _, weight in terms)
         if not terms:
@@ -142,8 +145,12 @@ def content_matches(text, profile):
         if ai_match and category['id'] not in ('models', 'ai_tools'):
             reasons.append('元数据同时包含AI或大模型相关关键词')
         matches.append((category['id'], score, reasons))
-    specialist = {'hardware', 'measurement', 'creative_sim', 'vision_3d', 'embodied'}
-    return sorted(matches, key=lambda item: (-item[1], item[0] not in specialist))
+    specialist = {'hardware', 'measurement', 'creative_sim', 'vision_3d', 'embodied', 'space_sim'}
+    # A narrowly identified domain wins over a long list of generic AI/vision/
+    # robotics terms. Priority is configured only alongside an explicit gate.
+    priorities = {category['id']: category.get('priority', 0)
+                  if category.get('requiredAnyTerms') else 0 for category in profile['categories']}
+    return sorted(matches, key=lambda item: (-priorities[item[0]], -item[1], item[0] not in specialist))
 
 
 def rank_project(project, profile, now=None):
@@ -249,12 +256,14 @@ def load_input(path, statuses):
 
 def search_projects(profile, token, today, statuses):
     active_since = (today - timedelta(days=profile.get('activeWithinDays', 180))).isoformat()
-    queries = profile.get('searchQueries', [])
+    queries = profile.get('searchQueries', [])[:18]
     if not token:
         # Preserve specialist domains, rather than spending the public quota
         # on several overlapping AI tooling searches.
-        queries = [query for index, query in enumerate(queries)
-                   if index in (0, 2, 4, 5, 7, 8, 9, 11)][:8]
+        public_labels = profile.get('publicSearchLabels')
+        if public_labels:
+            queries = [query for query in queries if query['label'] in public_labels]
+        queries = queries[:9]
         statuses.append({'name': 'GitHub Search 配额', 'ok': False,
                          'message': '未设置GitHub令牌，本次缩减搜索数量以遵守公开接口限额'})
 
@@ -281,6 +290,42 @@ def search_projects(profile, token, today, statuses):
                                  'message': f'获取{len(projects)}条候选' + ('，接口提示结果不完整' if incomplete else '')})
             except FetchError as exc:
                 statuses.append({'name': 'GitHub Search · ' + query['label'], 'ok': False,
+                                 'message': str(exc) + '；其他来源继续运行'})
+    return results
+
+
+def seed_projects(profile, token, today, statuses):
+    """Read a bounded watchlist as candidates, never as forced recommendations."""
+    repositories = list(dict.fromkeys(profile.get('seedRepositories', [])))[:8]
+    if not repositories:
+        return []
+    cutoff = today - timedelta(days=profile.get('activeWithinDays', 180))
+
+    def inspect(name):
+        if not re.fullmatch(r'[\w.-]+/[\w.-]+', name):
+            raise FetchError('仓库名称无效')
+        raw = fetch_json('https://api.github.com/repos/' + name, token)
+        if not isinstance(raw, dict) or not raw.get('full_name'):
+            raise FetchError('接口返回格式无效')
+        pushed = parse_time(raw.get('pushed_at'))
+        if raw.get('archived') or raw.get('fork') or not pushed or pushed.date() < cutoff:
+            return None
+        return project_from_metadata(raw, 'GitHub Repository')
+
+    results = []
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {executor.submit(inspect, name): name for name in repositories}
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                project = future.result()
+                if project:
+                    results.append(project)
+                statuses.append({'name': 'GitHub Repository · ' + name, 'ok': True,
+                                 'message': '获取最新仓库元数据，继续参与相关性及去重筛选' if project
+                                            else '未满足近期活跃或非归档/非复刻要求，略过候选'})
+            except FetchError as exc:
+                statuses.append({'name': 'GitHub Repository · ' + name, 'ok': False,
                                  'message': str(exc) + '；其他来源继续运行'})
     return results
 
@@ -458,10 +503,12 @@ def main(argv=None):
     statuses = []
     upstream = load_input(args.input, statuses)
     token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         searches_future = executor.submit(search_projects, profile, token, today, statuses)
+        seeds_future = executor.submit(seed_projects, profile, token, today, statuses)
         supplements_future = executor.submit(supplemental_data, upstream, statuses)
-        searches, supplements = searches_future.result(), supplements_future.result()
+        searches = searches_future.result() + seeds_future.result()
+        supplements = supplements_future.result()
     digest, updated_state = build_digest(upstream, searches, supplements,
                                          candidate_profile(profile, args.candidate_multiplier),
                                          state, statuses, today)

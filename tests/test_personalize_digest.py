@@ -25,8 +25,8 @@ class PersonalizeDigestTests(unittest.TestCase):
     def test_analysis_shortlist_expands_each_domain_without_mutating_profile(self):
         original = copy.deepcopy(PROFILE)
         expanded = digest.candidate_profile(PROFILE, 2)
-        self.assertEqual(expanded['projectLimit'], 36)
-        self.assertEqual(sum(item['quota'] for item in expanded['categories']), 36)
+        self.assertEqual(expanded['projectLimit'], 90)
+        self.assertEqual(sum(item['quota'] for item in expanded['categories']), 90)
         self.assertEqual(PROFILE, original)
         with self.assertRaises(ValueError):
             digest.candidate_profile(PROFILE, 4)
@@ -83,10 +83,118 @@ class PersonalizeDigestTests(unittest.TestCase):
                      repo('lab/optic', 'photonics and interferometry tools')]
         groups, _ = digest.choose_projects(projects, PROFILE, {}, TODAY)
         counts = {group['id']: len(group['projects']) for group in groups}
-        self.assertEqual(counts['models'], 2)
+        self.assertEqual(counts['models'], 5)
         self.assertEqual(counts['hardware'], 1)
         self.assertEqual(counts['measurement'], 1)
-        self.assertEqual(sum(counts.values()), 4)
+        self.assertEqual(sum(counts.values()), 7)
+
+    def test_all_nine_groups_and_supplements_have_at_most_five_final_items(self):
+        self.assertEqual(len(PROFILE['categories']), 9)
+        self.assertTrue(all(category['quota'] == 5 for category in PROFILE['categories']))
+        self.assertEqual(PROFILE['projectLimit'], 45)
+        for key in ('paperLimit', 'modelLimit', 'newsLimit'):
+            self.assertEqual(PROFILE[key], 5)
+        projects = [repo(f'lab/space-{i}', 'Astrodynamics and spacecraft simulation') for i in range(12)]
+        groups, _ = digest.choose_projects(projects, PROFILE, {}, TODAY)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]['id'], 'space_sim')
+        self.assertEqual(len(groups[0]['projects']), 5)
+
+    def test_space_sim_anchor_wins_over_generic_vision_robotics_and_creation_terms(self):
+        samples = [
+            ('CesiumGS/cesium', '3D globes and maps', 'space_sim'),
+            ('lab/cesium-sensors', 'CesiumJS sensor simulator with computer vision, point cloud and lidar', 'space_sim'),
+            ('iamaisim/ProjectAirSim', 'Unreal Engine drone robotics SLAM simulation engine', 'space_sim'),
+            ('AVSLab/basilisk', 'Astrodynamics simulation framework', 'space_sim'),
+            ('nasa/GMAT', 'General Mission Analysis Tool for lunar and deep space missions', 'space_sim'),
+            ('lab/lunar', 'Planetary terrain and lunar rover with robotics, ROS2 and visual odometry', 'space_sim'),
+            ('lab/sensors', 'Multi-sensor simulation and synthetic dataset generation using Unreal Engine', 'space_sim'),
+        ]
+        for name, description, category in samples:
+            with self.subTest(name=name):
+                ranked = digest.rank_project(repo(name, description), PROFILE)
+                self.assertEqual(ranked['category'], category)
+                self.assertTrue(ranked['reasons'])
+
+    def test_generic_simulation_and_homonyms_do_not_become_space_projects(self):
+        samples = [
+            ('lab/engine', 'Physics simulation engine with Blender and animation'),
+            ('lab/robot', 'Robotics drone simulator with ROS2'),
+            ('lab/data', 'Synthetic dataset generation for image matching'),
+            ('lab/basilisk', 'Basilisk game engine and animation toolkit'),
+            ('lab/cesium', 'Cesium atomic clock precision measurement'),
+            ('lab/gmat', 'GMAT exam preparation notebook'),
+        ]
+        for name, description in samples:
+            with self.subTest(name=name):
+                ranked = digest.rank_project(repo(name, description), PROFILE)
+                self.assertTrue(ranked is None or ranked['category'] != 'space_sim')
+
+    def test_space_group_stays_sparse_after_relevance_and_recent_delivery_filtering(self):
+        projects = [repo('lab/fresh', 'Astrodynamics simulation framework'),
+                    repo('lab/recent', 'Spacecraft orbital dynamics'),
+                    repo('lab/unrelated', 'Planet wallpaper simulator')]
+        groups, removed = digest.choose_projects(projects, PROFILE,
+                                                 {'lastSent': {'lab/recent': TODAY.isoformat()}}, TODAY)
+        self.assertEqual(removed, 1)
+        self.assertEqual([p['title'] for g in groups for p in g['projects']], ['lab/fresh'])
+
+    def test_seed_candidates_require_live_active_metadata_and_correct_attribution(self):
+        seeds = ['lab/live', 'lab/stale', 'lab/archived', 'lab/fork', 'lab/missing-date']
+        metadata = {
+            'live': {'pushed_at': '2026-11-13T00:00:00Z'},
+            'stale': {'pushed_at': '2020-01-01T00:00:00Z'},
+            'archived': {'pushed_at': '2026-11-13T00:00:00Z', 'archived': True},
+            'fork': {'pushed_at': '2026-11-13T00:00:00Z', 'fork': True},
+            'missing-date': {},
+        }
+        def fake_fetch(url, token=None):
+            name = url.rsplit('/', 1)[-1]
+            return {'full_name': 'lab/' + name, 'description': 'Astrodynamics toolkit',
+                    'todayStars': '9999', **metadata[name]}
+        statuses = []
+        with patch.object(digest, 'fetch_json', side_effect=fake_fetch) as fetch:
+            projects = digest.seed_projects({**PROFILE, 'seedRepositories': seeds}, 'token', TODAY, statuses)
+        self.assertEqual(fetch.call_count, len(seeds))
+        self.assertEqual([project['title'] for project in projects], ['lab/live'])
+        self.assertEqual(projects[0]['sources'], ['GitHub Repository'])
+        self.assertIsNone(projects[0]['starsToday'])
+        self.assertTrue(all(status['ok'] for status in statuses))
+        groups, _ = digest.choose_projects(projects, PROFILE,
+                                           {'lastSent': {'lab/live': TODAY.isoformat()}}, TODAY)
+        self.assertEqual(groups, [])
+
+    def test_one_seed_failure_does_not_discard_other_candidates(self):
+        def fake_fetch(url, token=None):
+            if url.endswith('/failed'):
+                raise digest.FetchError('HTTP 503')
+            return {'full_name': 'lab/live', 'description': 'Spacecraft dynamics toolkit',
+                    'pushed_at': '2026-11-13T00:00:00Z'}
+        statuses = []
+        with patch.object(digest, 'fetch_json', side_effect=fake_fetch):
+            projects = digest.seed_projects({'seedRepositories': ['lab/failed', 'lab/live']}, 'token', TODAY, statuses)
+        self.assertEqual(len(projects), 1)
+        self.assertEqual(sorted(status['ok'] for status in statuses), [False, True])
+
+    def test_public_search_budget_preserves_all_nine_domains(self):
+        statuses = []
+        with patch.object(digest, 'fetch_json', return_value={'items': []}) as fetch:
+            digest.search_projects(PROFILE, None, TODAY, statuses)
+        self.assertEqual(fetch.call_count, 9)
+        query_urls = [call.args[0] for call in fetch.call_args_list]
+        self.assertTrue(any('astrodynamics' in url for url in query_urls))
+        self.assertTrue(any('photonics' in url for url in query_urls))
+        self.assertTrue(any('fpga' in url for url in query_urls))
+
+    def test_repository_and_search_api_work_are_bounded(self):
+        profile = {**PROFILE, 'searchQueries': PROFILE['searchQueries'] * 3,
+                   'seedRepositories': [f'lab/tool-{i}' for i in range(20)]}
+        with patch.object(digest, 'fetch_json', return_value={'items': []}) as fetch:
+            digest.search_projects(profile, 'token', TODAY, [])
+        self.assertEqual(fetch.call_count, 18)
+        with patch.object(digest, 'fetch_json', side_effect=digest.FetchError('HTTP 503')) as fetch:
+            digest.seed_projects(profile, 'token', TODAY, [])
+        self.assertEqual(fetch.call_count, 8)
 
     def test_empty_relevant_pool_stops_instead_of_filling_old_items(self):
         with self.assertRaisesRegex(ValueError, '未找到'):
