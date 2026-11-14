@@ -317,7 +317,7 @@ def _digest_section(title, cards):
 
 
 def _digest_card(parts):
-    return '<div style="margin:0 0 12px;padding:16px;border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;">' + ''.join(parts) + '</div>'
+    return '<div style="margin:0 0 12px;padding:16px;border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;color:#374151;line-height:1.7;word-break:break-word;">' + ''.join(parts) + '</div>'
 
 
 def _analysis_text(value, limit):
@@ -327,7 +327,7 @@ def _analysis_text(value, limit):
     return _digest_text(value, limit) if isinstance(value, str) else ''
 
 
-def _project_document_analysis(project):
+def _project_document_analysis(project, compact=False):
     """Return a document analysis card only when reading actually succeeded."""
     analysis = project.get('llmAnalysis')
     if not isinstance(analysis, dict) or analysis.get('status') != 'analyzed':
@@ -341,7 +341,7 @@ def _project_document_analysis(project):
     if not summary:
         return ''
     parts = [
-        '<p style="margin:0;color:#374151;line-height:1.7;word-break:break-word;"><strong>项目简介：</strong>' + summary + '</p>',
+        '<p style="margin:0;"><strong>项目简介：</strong>' + summary + '</p>',
     ]
     details = []
     for field, label, limit, fallback in (
@@ -351,7 +351,7 @@ def _project_document_analysis(project):
     ):
         text = _analysis_text(analysis.get(field), limit) or fallback
         details.append('<strong>' + label + '：</strong>' + text)
-    parts.append('<p style="margin:7px 0 0;color:#374151;font-size:13px;line-height:1.7;word-break:break-word;">' + '<br>'.join(details) + '</p>')
+    parts.append('<p style="margin:7px 0 0;font-size:13px;">' + '<br>'.join(details) + '</p>')
     evidence = analysis.get('evidence')
     citations = []
     if isinstance(evidence, list):
@@ -362,17 +362,20 @@ def _project_document_analysis(project):
             quote = _analysis_text(item.get('quote'), 60)
             if not url or not quote:
                 continue
-            citations.append('<a href="' + url + '" style="color:#1d4ed8;text-decoration:none;">文档依据 ' + str(len(citations) + 1) + '</a>：&ldquo;' + quote + '&rdquo;')
+            citation = '<a href="' + url + '" style="color:#1d4ed8;text-decoration:none;">文档依据 ' + str(len(citations) + 1) + '</a>'
+            if not compact:
+                citation += '：&ldquo;' + quote + '&rdquo;'
+            citations.append(citation)
             if len(citations) == 2:
                 break
     evidence_note = 'AI 文档分析 · 已读取 ' + str(documents) + ' 份 README / 仓库文档片段'
     if citations:
         evidence_note += '<br>' + '<br>'.join(citations)
-    parts.append('<p style="margin:9px 0 0;color:#6b7280;font-size:12px;line-height:1.7;word-break:break-word;">' + evidence_note + '</p>')
+    parts.append('<p style="margin:9px 0 0;color:#6b7280;font-size:12px;">' + evidence_note + '</p>')
     return ''.join(parts)
 
 
-def render_personalized_digest(digest):
+def render_personalized_digest(digest, compact=False):
     """Render source metadata and, when present, evidence-linked AI analyses."""
     if not isinstance(digest, dict):
         raise ValueError('personalizedDigest must be a JSON object.')
@@ -397,7 +400,7 @@ def render_personalized_digest(digest):
         cards = []
         for project in projects:
             parts = ['<h3 style="margin:0 0 8px;font-size:16px;line-height:1.5;">' + _digest_link(project) + '</h3>']
-            document_analysis = _project_document_analysis(project)
+            document_analysis = _project_document_analysis(project, compact=compact)
             if document_analysis:
                 analyzed_count += 1
                 parts.append(document_analysis)
@@ -407,7 +410,8 @@ def render_personalized_digest(digest):
                     parts.append('<p style="margin:0 0 8px;color:#92400e;font-size:12px;line-height:1.6;">本项未完成文档分析，仅按关键词初筛。</p>')
                 if project.get('description'):
                     parts.append('<p style="margin:0;color:#374151;line-height:1.7;word-break:break-word;"><strong>项目简介：</strong>' + _digest_text(project['description'], 260) + '</p>')
-            parts.append(_digest_reasons(project))
+            if not document_analysis:
+                parts.append(_digest_reasons(project))
             metadata = []
             stars = _digest_number(project.get('stars'))
             today = _digest_number(project.get('starsToday'))
@@ -483,7 +487,7 @@ def render_personalized_digest(digest):
     else:
         introduction = '本期 ' + str(project_count) + ' 个匹配项目。每组最多 5 项，宁缺毋滥。按兴趣主题筛选与去重；项目介绍和论文摘要保留原文。'
         analysis_note = '匹配方向依据你关注的主题与关键词生成，供快速筛选；具体能力与使用条件请查看原链接。'
-    return (
+    output = (
         '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI 科研与工程日报</title></head>'
         '<body style="margin:0;padding:0;background:#f3f4f6;color:#1f2937;font-family:Arial,\'Microsoft YaHei\',sans-serif;font-size:14px;">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;"><tr><td align="center" style="padding:16px 8px;">'
@@ -497,6 +501,11 @@ def render_personalized_digest(digest):
         '<p style="margin:6px 0 0;">' + analysis_note + '</p>'
         + source_note + '</div></td></tr></table></td></tr></table></body></html>'
     )
+    if not compact and len(output.encode('utf-8')) > 95_000:
+        # Keep every project and its conditions; long issues link to the
+        # evidence instead of repeating the quoted source text in the email.
+        return render_personalized_digest(digest, compact=True)
+    return output
 
 
 def format_email(data, remote_jobs_report=None):

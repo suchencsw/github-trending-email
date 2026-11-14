@@ -62,6 +62,24 @@ class LLMEmailTests(unittest.TestCase):
         self.assertNotIn('…', first_paragraph)
         self.assertNotIn('Original metadata description.', first_paragraph)
 
+    def test_long_digest_keeps_projects_and_conditions_while_linking_evidence(self):
+        self.digest['categories'] = []
+        for group in range(9):
+            projects = []
+            for index in range(5):
+                item = copy.deepcopy(self.project)
+                item['title'] = f'lab/tool-{group}-{index}'
+                item['llmAnalysis']['summary'] = '功能介绍。' * 30
+                item['llmAnalysis']['requirements'] = '需要兼容工具链。' * 30
+                projects.append(item)
+            self.digest['categories'].append({'label': f'领域{group}', 'projects': projects})
+        output = self.render()
+        self.assertEqual(output.count('项目简介：</strong>'), 45)
+        self.assertEqual(output.count('需要兼容工具链。' * 30), 45)
+        self.assertEqual(output.count('文档依据 1'), 45)
+        self.assertNotIn('Run Verilog simulations with an agent.', output)
+        self.assertIn('lab/tool-8-4', output)
+
     def test_every_project_group_caps_at_five_and_counts_only_displayed_items(self):
         hardware = []
         for index in range(6):
