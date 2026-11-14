@@ -218,6 +218,18 @@ def prompt_messages(project, documents, profile):
             {'role': 'user', 'content': json.dumps(data, ensure_ascii=False)}]
 
 
+def has_unsupported_test_claim(value):
+    claim = r'已(?:经)?(?:运行|实测|测试通过|验证通过|执行)|经(?:过)?(?:实测|运行验证)'
+    negation = r'(?:未(?:曾|能)?|没有|不曾|不能|无法)'
+    uncertainty = (negation + r'\s*(?:明确|充分|直接)?'
+                   r'(?:说明|表明|证明|证实|确认|保证|认定|断定|声称|显示)'
+                   r'(?:该项目|本项目|项目|其|作者|我们|它|是否)?')
+    # Remove only the directly negated claim, never the rest of its sentence.
+    # A later affirmative claim must still be rejected, even without punctuation.
+    remainder = re.sub(r'(?:' + uncertainty + '|' + negation + r')\s*(?:' + claim + ')', '', value)
+    return re.search(claim, remainder) is not None
+
+
 def clean_field(raw, field, limit):
     value = raw.get(field)
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
@@ -228,7 +240,7 @@ def clean_field(raw, field, limit):
     if len(value) > limit:
         raise AnalysisError('模型分析字段超过长度限制')
     # These claims are never justified by this read-only pipeline.
-    if re.search(r'已(?:经)?(?:运行|实测|测试通过|验证通过|执行)|经(?:过)?(?:实测|运行验证)', value):
+    if has_unsupported_test_claim(value):
         raise AnalysisError('模型输出包含不支持的实测声明')
     if re.search(r'\bsk-[A-Za-z0-9]{16,}\b', value):
         raise AnalysisError('模型输出包含疑似凭据')
@@ -250,8 +262,17 @@ def validate_analysis(raw, documents):
         if not isinstance(entry, dict) or not isinstance(entry.get('url'), str) or entry['url'] not in sources:
             raise AnalysisError('模型证据链接不属于已读取文档')
         excerpt = entry.get('quote')
-        if not isinstance(excerpt, str) or not 20 <= len(excerpt) <= 160 or excerpt not in sources[entry['url']]:
+        if not isinstance(excerpt, str) or not 20 <= len(excerpt) <= 160:
             raise AnalysisError('模型引用不是文档片段中的连续原文')
+        source = sources[entry['url']]
+        if excerpt not in source:
+            # Models sometimes collapse Markdown line breaks to spaces. Recover
+            # only whitespace differences and retain the exact source span.
+            pattern = r'\s+'.join(re.escape(word) for word in excerpt.split())
+            match = re.search(pattern, source) if pattern else None
+            if match is None or not 20 <= len(match.group()) <= 160:
+                raise AnalysisError('模型引用不是文档片段中的连续原文')
+            excerpt = match.group()
         if re.search(r'\bsk-[A-Za-z0-9]{16,}\b', excerpt):
             raise AnalysisError('文档引用包含疑似凭据')
         checked.append({'url': entry['url'], 'quote': excerpt})

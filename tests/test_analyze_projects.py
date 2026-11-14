@@ -116,6 +116,18 @@ class AnalyzeProjectTests(unittest.TestCase):
             analyze.validate_analysis(model_result(evidence=[{'url': document['url'],
                 'quote': 'hidden instruction beyond the excerpt'}]), [document])
 
+    def test_wrapped_quotation_recovers_exact_source_without_accepting_changed_words(self):
+        source = 'Generate Verilog\n  testbenches with an AI assistant.'
+        docs = [{**DOCS[0], 'text': source}]
+        result = analyze.validate_analysis(model_result(), docs)
+        self.assertEqual(result['evidence'][0]['quote'], source)
+        changed = ['Generate Verilog benches with an AI assistant.',
+                   'Generate Verilog testbenches with a great AI assistant.',
+                   'Generate Verilog ... with an AI assistant.']
+        for quotation in changed:
+            with self.subTest(quotation=quotation), self.assertRaises(analyze.AnalysisError):
+                analyze.validate_analysis(model_result(evidence=[{'url': DOCS[0]['url'], 'quote': quotation}]), docs)
+
     def test_fabricated_quotes_urls_and_test_claims_are_rejected(self):
         cases = [model_result(evidence=[{'url': 'https://evil.invalid', 'quote': DOCS[0]['text']}]),
                  model_result(evidence=[{'url': DOCS[0]['url'], 'quote': 'Fabricated evidence that does not occur.'}]),
@@ -125,6 +137,24 @@ class AnalyzeProjectTests(unittest.TestCase):
         for raw in cases:
             with self.subTest(raw=raw), self.assertRaises(analyze.AnalysisError):
                 analyze.validate_analysis(raw, DOCS)
+
+    def test_negated_testing_disclosures_are_accepted(self):
+        disclosures = ['未经实测，适用性需自行评估。', '未经运行验证。',
+                       '文档未说明已经测试通过。', '未执行代码或进行实测。',
+                       '没有经过实测。', '文档未明确确认该项目已经运行。']
+        for disclosure in disclosures:
+            with self.subTest(disclosure=disclosure):
+                result = analyze.validate_analysis(model_result(limitations=disclosure), DOCS)
+                self.assertEqual(result['limitations'], disclosure)
+
+    def test_each_affirmative_testing_claim_is_rejected_independently(self):
+        claims = ['已经实测，可立即使用。', '已经运行。', '经过实测，效果很好。',
+                  '未经实测，但已经运行。', '文档未说明已经测试通过；已经实测，效果很好。',
+                  '文档未说明已经测试通过但已经运行。', '未经运行验证，经过实测效果很好。',
+                  '未执行代码或进行实测；已经测试通过。']
+        for claim in claims:
+            with self.subTest(claim=claim), self.assertRaisesRegex(analyze.AnalysisError, '实测声明'):
+                analyze.validate_analysis(model_result(limitations=claim), DOCS)
 
     def test_model_request_is_bounded_json_without_reasoning_or_tools(self):
         response = {'choices': [{'message': {'content': json.dumps(model_result())}, 'finish_reason': 'stop'}],

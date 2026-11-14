@@ -338,12 +338,12 @@ def _project_document_analysis(project):
     if not summary:
         return ''
     parts = [
-        '<p style="margin:0 0 8px;color:#1d4ed8;font-size:12px;line-height:1.6;">AI 文档分析 · 已读取 ' + str(documents) + ' 份 README / 仓库文档</p>',
+        '<p style="margin:0 0 8px;color:#1d4ed8;font-size:12px;line-height:1.6;">AI 文档分析 · 已读取 ' + str(documents) + ' 份 README / 仓库文档片段</p>',
         '<p style="margin:0;color:#374151;line-height:1.7;word-break:break-word;">' + summary + '</p>',
     ]
     for field, label, limit, fallback in (
         ('useCase', '对你的用途', 180, '资料不足，暂未确定具体接入方式。'),
-        ('requirements', '使用条件', 120, '文档未明确，请查看项目说明。'),
+        ('requirements', '使用条件', 280, '文档未明确，请查看项目说明。'),
         ('limitations', '限制与待确认', 150, '尚未运行验证，实际效果需自行测试。'),
     ):
         text = _analysis_text(analysis.get(field), limit) or fallback
@@ -472,7 +472,7 @@ def render_personalized_digest(digest):
         if fallback_count:
             introduction += str(fallback_count) + ' 个仅按关键词初筛，已单独标注。'
         introduction += '论文、模型与科技动态仍基于来源信息筛选，介绍和摘要保留原文。'
-        analysis_note = '项目中文分析依据实际读取的 README 与仓库文档生成，文档依据可点击核对；未运行项目或验证作者宣称的效果。'
+        analysis_note = '项目中文分析依据实际读取的 README 与仓库文档片段生成，文档依据可点击核对；未运行项目或验证作者宣称的效果。'
         model = _analysis_text(analysis_status.get('model'), 100)
         if model:
             analysis_note += ' 分析模型：' + model + '。'
