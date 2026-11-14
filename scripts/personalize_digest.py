@@ -5,6 +5,7 @@ State is staged separately; the delivery workflow saves it only after SMTP succe
 """
 
 import argparse
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 import json
@@ -211,6 +212,17 @@ def next_state(previous, categories, today):
         for project in category['projects']:
             entries[project['title'].lower()] = today.isoformat()
     return {'version': 1, 'lastSent': entries}
+
+
+def candidate_profile(profile, multiplier=1):
+    """Expand each domain before the document analysis makes the final selection."""
+    if multiplier not in (1, 2, 3):
+        raise ValueError('Candidate multiplier must be 1, 2 or 3.')
+    expanded = deepcopy(profile)
+    expanded['projectLimit'] = profile.get('projectLimit', 18) * multiplier
+    for category in expanded['categories']:
+        category['quota'] *= multiplier
+    return expanded
 
 
 def load_input(path, statuses):
@@ -434,6 +446,7 @@ def main(argv=None):
     parser.add_argument('--state', type=Path, default=Path('.github/personalization-state.json'))
     parser.add_argument('--state-output', type=Path, default=Path('output/next-personalization-state.json'))
     parser.add_argument('--profile', type=Path, default=Path('config/interests.json'))
+    parser.add_argument('--candidate-multiplier', type=int, choices=(1, 2, 3), default=1)
     args = parser.parse_args(argv)
     if args.state.resolve() == args.state_output.resolve():
         raise ValueError('待提交状态必须写入独立文件；原始去重状态只能在成功发信后保存。')
@@ -449,7 +462,9 @@ def main(argv=None):
         searches_future = executor.submit(search_projects, profile, token, today, statuses)
         supplements_future = executor.submit(supplemental_data, upstream, statuses)
         searches, supplements = searches_future.result(), supplements_future.result()
-    digest, updated_state = build_digest(upstream, searches, supplements, profile, state, statuses, today)
+    digest, updated_state = build_digest(upstream, searches, supplements,
+                                         candidate_profile(profile, args.candidate_multiplier),
+                                         state, statuses, today)
     for destination, value in ((args.output, digest), (args.state_output, updated_state)):
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

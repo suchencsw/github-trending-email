@@ -22,6 +22,15 @@ def repo(name, description, stars=100, source='GitHub Search', **extra):
 
 
 class PersonalizeDigestTests(unittest.TestCase):
+    def test_analysis_shortlist_expands_each_domain_without_mutating_profile(self):
+        original = copy.deepcopy(PROFILE)
+        expanded = digest.candidate_profile(PROFILE, 2)
+        self.assertEqual(expanded['projectLimit'], 36)
+        self.assertEqual(sum(item['quota'] for item in expanded['categories']), 36)
+        self.assertEqual(PROFILE, original)
+        with self.assertRaises(ValueError):
+            digest.candidate_profile(PROFILE, 4)
+
     def test_multidisciplinary_engineering_matches_have_evidence(self):
         samples = [
             ('lab/paper', 'AI research assistant for literature review', 'research'),

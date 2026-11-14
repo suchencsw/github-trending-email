@@ -27,7 +27,7 @@ jobs:
   daily-digest:
     if: github.event_name == 'workflow_dispatch' || vars.DIGEST_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -91,6 +91,38 @@ jobs:
           --state .github/personalization-state.json
           --state-output output/next-personalization-state.json
           --profile config/interests.json
+          --candidate-multiplier 2
+
+      - name: Restore project analysis cache
+        if: steps.state.outputs.run == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/project-analysis
+          key: research-analysis-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: research-analysis-v1-${{ runner.os }}-
+
+      - name: Read project documents and analyze research value
+        if: steps.state.outputs.run == 'true'
+        timeout-minutes: 10
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'deepseek-ai/DeepSeek-V4.1-Flash' }}
+        run: >-
+          python scripts/analyze_projects.py
+          --input output/personalized.json
+          --output output/analyzed.json
+          --profile config/interests.json
+          --state .github/personalization-state.json
+          --state-output output/next-personalization-state.json
+          --cache-dir .cache/project-analysis
+
+      - name: Save project analysis cache
+        if: steps.state.outputs.run == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/project-analysis
+          key: research-analysis-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Install mail dependency
         if: steps.state.outputs.run == 'true'
@@ -107,7 +139,7 @@ jobs:
           SMTP_SSL: ${{ vars.SMTP_SSL || 'true' }}
           SMTP_STARTTLS: ${{ vars.SMTP_STARTTLS || 'false' }}
           EMAIL_SUBJECT: AI科研与工程生产力日报 - ${{ env.DIGEST_DATE }}
-          TRENDING_DATA_FILE: output/personalized.json
+          TRENDING_DATA_FILE: output/analyzed.json
           PREVIEW_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.preview_only }}
         run: |
           if [ "$PREVIEW_ONLY" = 'true' ]; then
@@ -123,7 +155,7 @@ jobs:
           name: digest-preview
           path: |
             output/digest-preview.html
-            output/personalized.json
+            output/analyzed.json
           retention-days: 7
           if-no-files-found: error
 

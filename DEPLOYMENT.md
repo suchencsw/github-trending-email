@@ -11,6 +11,7 @@
 | `SMTP_USERNAME` | 发信邮箱地址 |
 | `SMTP_PASSWORD` | 邮箱的 SMTP 授权码或应用专用密码 |
 | `SMTP_TO` | 收件邮箱地址 |
+| `SILICONFLOW_API_KEY` | 硅基流动模型接口密钥 |
 
 QQ 邮箱使用 `smtp.qq.com`、端口 `465`、`SMTP_SSL=true`、`SMTP_STARTTLS=false`。授权码需要先在 QQ 邮箱设置中开启 SMTP 服务后生成，不能使用邮箱登录密码。邮箱地址与凭据均保存在 Secrets 中。
 
@@ -32,18 +33,31 @@ QQ 邮箱使用 `smtp.qq.com`、端口 `465`、`SMTP_SSL=true`、`SMTP_STARTTLS=
 | `ENABLE_AI_PAPERS` | `true` | 收集论文 |
 | `ENABLE_DEV_TO` | `false` | 原项目的 Dev.to 来源 |
 | `DIGEST_ITEM_LIMIT` | 当前为 `20` | 原项目各可选来源的候选数；最终数量由兴趣配置限制 |
+| `LLM_MODEL` | `deepseek-ai/DeepSeek-V4.1-Flash` | 硅基流动中用于项目分析的模型 |
 
-个性化筛选还会使用 GitHub 官方搜索接口补充领域项目，使用工作流自动提供的 GitHub 令牌，无需另购 AI 接口。热榜收集与领域搜索分别标注来源，只有热榜提供时才显示当天新增星标。
+个性化筛选使用 GitHub 官方搜索接口补充领域项目，使用工作流自动提供的 GitHub 令牌。热榜收集与领域搜索分别标注来源，只有热榜提供时才显示当天新增星标。
+
+## 大模型阅读与筛选
+
+工作流先按每个领域的名额加倍粗筛，最多 36 个候选项目；随后读取公开 README 和仓库内的部分相关文档，交给硅基流动分析。读取内容有长度限制，未阅读整个工程，也不安装、执行项目代码。
+
+模型结合研究兴趣给出中文用途、科研接入方式、条件与限制，并引用实际读取文档中的原文。最终按各组原始名额选择最多 18 项；模型拒绝、不够相关或无法验证文档引用的项目不会凑数加入。论文、模型和新闻栏目仍由元数据筛选。
+
+模型接口遵循硅基流动官方地址 `https://api.siliconflow.cn/v1/chat/completions`，使用 `SILICONFLOW_API_KEY`。公开项目资料与兴趣配置会发送给该服务，不发送邮箱凭据或 GitHub 令牌。模型不能调用工具或执行仓库中的指令。
+
+分析缓存通过 GitHub Actions Cache 保存，文档内容、模型或兴趣配置改变时重新分析；缓存最长复用 7 天。预览也可能产生模型用量。每个项目有输入长度和输出 token 限制，最多并发 2 个分析；精确费用以硅基流动账单为准。
+
+部分项目分析失败时，仅从成功分析的项目中选取；所有分析失败或没有合适项目则任务中止。邮件中的文档分析不能替代实际运行验证。
 
 ## 修改兴趣
 
 编辑 [config/interests.json](config/interests.json) 中的类别、关键词、搜索条件和数量限制。语言条件只影响热榜候选；兴趣类别决定项目的相关性和邮件分组。
 
-默认关注 AI 科研工具、大模型与开发工具、视觉与三维、机器人与仿真、硬件与嵌入式、精密测量等方向。邮件展示筛选理由；项目说明保留来源原文。
+默认关注 AI 科研工具、大模型与开发工具、视觉与三维、机器人与仿真、硬件与嵌入式、精密测量等方向。`researchGoal` 描述实际研究用途偏好；邮件展示文档分析和来源依据。
 
 ## 首次运行与故障排查
 
-1. 打开 Actions → GitHub Trending Email → Run workflow，保留 `preview_only=true`。此操作生成预览，不需要 SMTP 授权码。
+1. 配置 `SILICONFLOW_API_KEY`。打开 Actions → GitHub Trending Email → Run workflow，保留 `preview_only=true`。此操作生成预览，不需要 SMTP 授权码，但会按需调用模型。
 2. 在成功运行的 Artifacts 中下载 `digest-preview`，查看邮件内容。
 3. 配好邮箱 Secrets 后，以 `preview_only=false` 运行一次，检查发信结果和收件箱。
 4. 将 `DIGEST_ENABLED` 改为 `true`，启用每日发送。
