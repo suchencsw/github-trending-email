@@ -158,17 +158,76 @@ class LLMEmailTests(unittest.TestCase):
                          '尚未运行验证，实际效果需自行测试'):
             self.assertIn(expected, output)
 
-    def test_supplements_remain_labeled_as_source_metadata(self):
-        self.digest['papers'] = [{'title': 'Paper', 'url': 'https://arxiv.org/abs/1234.56789', 'summary': 'Original paper abstract.'}]
+    def test_paper_abstract_is_chinese_and_other_supplements_remain_source_metadata(self):
+        summary = '论文提出基于视觉匹配的导航方法，通过多视角特征关联估计相机位姿；摘要未提供真实无人机部署条件。'
+        self.digest['papers'] = [{
+            'title': 'Visual Navigation', 'url': 'https://arxiv.org/abs/1234.56789',
+            'summary': 'Original paper abstract.', 'authors': ['Alice', 'Bob'],
+            'publishedAt': '2026-11-13T09:00:00Z',
+            'chineseSummary': {'status': 'translated', 'summary': summary, 'source': 'abstract'},
+        }]
+        self.digest['models'] = [{'title': 'Model', 'description': 'Original model description.'}]
+        self.digest['news'] = [{'title': 'News', 'description': 'Original news description.'}]
         output = self.render()
-        self.assertIn('论文、模型与科技动态仍基于来源信息筛选，介绍和摘要保留原文', output)
-        self.assertIn('Original paper abstract.', output)
+        for expected in ('中文摘要解读：</strong>' + summary,
+                         'href="https://arxiv.org/abs/1234.56789"', 'Visual Navigation</a>',
+                         '作者：Alice、Bob', '发表：2026-11-13',
+                         '模型与科技动态介绍保留原文', 'Original model description.',
+                         'Original news description.', '未阅读全文'):
+            self.assertIn(expected, output)
+        self.assertNotIn('Original paper abstract.', output)
+        self.assertNotIn('摘要保留原文', output)
+
+    def test_title_only_paper_never_claims_abstract_or_full_paper_reading(self):
+        self.digest['papers'] = [{
+            'title': 'Robot Matching', 'summary': 'An unverified English abstract.',
+            'chineseSummary': {'status': 'translated', 'source': 'title',
+                               'summary': '标题涉及机器人视觉匹配，具体方法与实验结果尚无法判断。'},
+        }]
+        output = self.render()
+        self.assertIn('中文标题概述：</strong>标题涉及机器人视觉匹配', output)
+        self.assertIn('仅标题概述，未获得摘要', output)
+        self.assertNotIn('中文摘要解读：</strong>', output)
+        self.assertNotIn('An unverified English abstract.', output)
+
+    def test_missing_failed_or_malformed_translation_has_chinese_fallback(self):
+        variants = (
+            None,
+            {'status': 'unavailable', 'summary': 'FAILED ENGLISH', 'error': 'SECRET'},
+            {'status': 'translated', 'source': 'abstract', 'summary': 'ENGLISH ONLY'},
+            {'status': 'translated', 'source': 'abstract', 'summary': '中文。' * 100},
+            {'status': 'translated', 'source': 'fulltext', 'summary': '不可信的全文阅读声明。'},
+            {'status': 'translated', 'source': 'abstract', 'summary': {'error': 'SECRET'}},
+        )
+        for translation in variants:
+            with self.subTest(translation=translation):
+                self.digest['papers'] = [{'title': 'Original title', 'url': 'https://arxiv.org/abs/1234.56789',
+                                         'summary': 'Original English abstract.', 'chineseSummary': translation}]
+                output = self.render()
+                self.assertIn('中文摘要暂不可用，请查看原文。', output)
+                self.assertIn('Original title</a>', output)
+                self.assertNotIn('Original English abstract.', output)
+                self.assertNotIn('FAILED ENGLISH', output)
+                self.assertNotIn('SECRET', output)
+
+    def test_chinese_paper_summary_is_escaped_and_keeps_complete_bounded_sentence(self):
+        summary = '中' * 216 + '；限制：<script>alert("x")</script>需进一步验证。'
+        self.assertLessEqual(len(summary), 260)
+        self.digest['papers'] = [{
+            'title': 'Paper', 'url': 'javascript:alert(1)',
+            'chineseSummary': {'status': 'translated', 'source': 'abstract', 'summary': summary},
+        }]
+        output = self.render()
+        self.assertIn('；限制：&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;需进一步验证。', output)
+        self.assertNotIn('<script>', output)
+        self.assertNotIn('href="javascript:', output)
+        self.assertNotIn('…需进一步验证', output)
 
     def test_plain_digest_retains_original_behavior(self):
         self.digest.pop('analysisStatus')
         self.project.pop('llmAnalysis')
         output = self.render()
-        self.assertIn('项目介绍和论文摘要保留原文', output)
+        self.assertIn('项目、模型与科技动态介绍保留原文，论文提供中文解读', output)
         self.assertIn('Original metadata description.', output)
         self.assertNotIn('本项未完成文档分析', output)
 

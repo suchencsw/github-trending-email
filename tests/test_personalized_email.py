@@ -95,8 +95,9 @@ class PersonalizedEmailTests(unittest.TestCase):
         self.digest['models'] = [{'title': 'example/model', 'url': 'https://huggingface.co/example/model', 'likes': 12, 'downloads': 3000}]
         self.digest['news'] = [{'title': 'Simulation news', 'url': 'https://example.com/news', 'score': 42}]
         output = self.render()
-        for expected in ('相关论文</h2>', 'Original abstract.', '作者：Alice、Bob', '相关模型</h2>', '下载 3,000', '喜欢 12', '相关科技动态</h2>', '社区热度 42'):
+        for expected in ('相关论文</h2>', '中文摘要暂不可用，请查看原文。', '作者：Alice、Bob', '相关模型</h2>', '下载 3,000', '喜欢 12', '相关科技动态</h2>', '社区热度 42'):
             self.assertIn(expected, output)
+        self.assertNotIn('Original abstract.', output)
 
     def test_supplementary_groups_each_show_at_most_five_real_items(self):
         for kind in ('papers', 'models', 'news'):

@@ -242,6 +242,17 @@ class PersonalizeDigestTests(unittest.TestCase):
         self.assertEqual([item['title'] for item in chosen], ['Embodied robot learning with simulation'])
         self.assertIn('robotics', chosen[0]['summary'])
 
+    def test_paper_summary_preserves_late_results_for_chinese_reading(self):
+        abstract = 'Robotics simulation. ' * 65 + 'The key limitation is absent ground-truth calibration.'
+        chosen = digest.pick_supplements([{'title': 'Robot learning from sensor simulation',
+            'url': 'https://example.org/paper', 'abstract': abstract}], 'papers', PROFILE, TODAY)
+        self.assertEqual(chosen[0]['summary'], abstract)
+        self.assertFalse(chosen[0]['summaryTruncated'])
+        chosen = digest.pick_supplements([{'title': 'Robot learning from sensor simulation',
+            'url': 'https://example.org/long-paper', 'abstract': abstract * 10}], 'papers', PROFILE, TODAY)
+        self.assertEqual(len(chosen[0]['summary']), 8000)
+        self.assertTrue(chosen[0]['summaryTruncated'])
+
     def test_models_use_real_tasks_and_reject_stale_metadata(self):
         models = [{'modelId': 'lab/fresh', 'pipeline_tag': 'text-generation', '_trendingCandidate': True,
                    'lastModified': '2026-11-13', 'likes': 10},

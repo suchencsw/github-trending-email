@@ -117,6 +117,19 @@ jobs:
           --state-output output/next-personalization-state.json
           --cache-dir .cache/project-analysis
 
+      - name: Summarize paper abstracts in Chinese
+        if: steps.state.outputs.run == 'true'
+        timeout-minutes: 4
+        env:
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'deepseek-ai/DeepSeek-V4.1-Flash' }}
+        run: >-
+          python scripts/summarize_papers.py
+          --input output/analyzed.json
+          --output output/digest.json
+          --profile config/interests.json
+          --cache-dir .cache/project-analysis
+
       - name: Save project analysis cache
         if: steps.state.outputs.run == 'true'
         uses: actions/cache/save@v4
@@ -139,7 +152,7 @@ jobs:
           SMTP_SSL: ${{ vars.SMTP_SSL || 'true' }}
           SMTP_STARTTLS: ${{ vars.SMTP_STARTTLS || 'false' }}
           EMAIL_SUBJECT: AI科研与工程生产力日报 - ${{ env.DIGEST_DATE }}
-          TRENDING_DATA_FILE: output/analyzed.json
+          TRENDING_DATA_FILE: output/digest.json
           PREVIEW_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.preview_only }}
         run: |
           if [ "$PREVIEW_ONLY" = 'true' ]; then
@@ -155,7 +168,7 @@ jobs:
           name: digest-preview
           path: |
             output/digest-preview.html
-            output/analyzed.json
+            output/digest.json
           retention-days: 7
           if-no-files-found: error
 

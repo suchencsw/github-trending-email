@@ -401,7 +401,8 @@ def pick_supplements(items, kind, profile, today=None):
             if timestamp and (today - timestamp.date()).days > 14:
                 continue
             authors = paper.get('authors') or []
-            item = {'title': title, 'url': safe_url(url), 'summary': summary[:900],
+            item = {'title': title, 'url': safe_url(url), 'summary': summary[:8000],
+                    'summaryTruncated': len(summary) > 8000,
                     'authors': [author.get('name', '') if isinstance(author, dict) else str(author)
                                 for author in authors[:5]],
                     'publishedAt': published}

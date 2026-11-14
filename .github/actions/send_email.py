@@ -375,6 +375,23 @@ def _project_document_analysis(project, compact=False):
     return ''.join(parts)
 
 
+def _paper_chinese_summary(paper):
+    """Show validated Chinese prose without substituting the English abstract."""
+    translation = paper.get('chineseSummary')
+    if isinstance(translation, dict) and translation.get('status') == 'translated':
+        summary = translation.get('summary')
+        source = translation.get('source')
+        if isinstance(summary, str) and source in ('abstract', 'title'):
+            summary = ' '.join(summary.split())
+            # The translator must produce a complete overview within this
+            # bound. Reject malformed output rather than cut a key sentence.
+            if summary and len(summary) <= 260 and re.search(r'[\u3400-\u9fff]', summary):
+                label = '中文摘要解读' if source == 'abstract' else '中文标题概述'
+                scope = '' if source == 'abstract' else '<br><span style="color:#92400e;font-size:12px;">仅标题概述，未获得摘要。</span>'
+                return '<p style="margin:0;"><strong>' + label + '：</strong>' + _digest_text(summary) + scope + '</p>'
+    return '<p style="margin:0;">中文摘要暂不可用，请查看原文。</p>'
+
+
 def render_personalized_digest(digest, compact=False):
     """Render source metadata and, when present, evidence-linked AI analyses."""
     if not isinstance(digest, dict):
@@ -441,9 +458,10 @@ def render_personalized_digest(digest, compact=False):
         cards = []
         for item in [item for item in items if isinstance(item, dict)][:5]:
             parts = ['<h3 style="margin:0 0 8px;font-size:16px;line-height:1.5;">' + _digest_link(item) + '</h3>']
-            description = item.get('summary') if key == 'papers' else item.get('description')
-            if description:
-                parts.append('<p style="margin:0;color:#374151;line-height:1.7;word-break:break-word;">' + _digest_text(description, 230) + '</p>')
+            if key == 'papers':
+                parts.append(_paper_chinese_summary(item))
+            elif item.get('description'):
+                parts.append('<p style="margin:0;color:#374151;line-height:1.7;word-break:break-word;">' + _digest_text(item['description'], 230) + '</p>')
             parts.append(_digest_reasons(item))
             metadata = []
             if key == 'papers':
@@ -479,14 +497,15 @@ def render_personalized_digest(digest, compact=False):
         introduction = '本期 ' + str(project_count) + ' 个匹配项目，其中 ' + str(analyzed_count) + ' 个完成 AI 文档分析。'
         if fallback_count:
             introduction += str(fallback_count) + ' 个仅按关键词初筛，已单独标注。'
-        introduction += '每组最多 5 项，宁缺毋滥。论文、模型与科技动态仍基于来源信息筛选，介绍和摘要保留原文。'
+        introduction += '每组最多 5 项，宁缺毋滥。论文提供中文解读，信息范围逐项标注；模型与科技动态介绍保留原文。'
         analysis_note = '项目中文分析依据实际读取的 README 与仓库文档片段生成，文档依据可点击核对；未运行项目或验证作者宣称的效果。'
         model = _analysis_text(analysis_status.get('model'), 100)
         if model:
             analysis_note += ' 分析模型：' + model + '。'
     else:
-        introduction = '本期 ' + str(project_count) + ' 个匹配项目。每组最多 5 项，宁缺毋滥。按兴趣主题筛选与去重；项目介绍和论文摘要保留原文。'
+        introduction = '本期 ' + str(project_count) + ' 个匹配项目。每组最多 5 项，宁缺毋滥。按兴趣主题筛选与去重；项目、模型与科技动态介绍保留原文，论文提供中文解读。'
         analysis_note = '匹配方向依据你关注的主题与关键词生成，供快速筛选；具体能力与使用条件请查看原链接。'
+    analysis_note += ' 论文中文解读仅依据已获得的摘要或标题，未阅读全文。'
     output = (
         '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI 科研与工程日报</title></head>'
         '<body style="margin:0;padding:0;background:#f3f4f6;color:#1f2937;font-family:Arial,\'Microsoft YaHei\',sans-serif;font-size:14px;">'
