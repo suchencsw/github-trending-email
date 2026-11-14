@@ -11,7 +11,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import posixpath
@@ -240,7 +239,7 @@ def validate_analysis(raw, documents):
     if not isinstance(raw, dict) or type(raw.get('eligible')) is not bool:
         raise AnalysisError('模型输出格式无效')
     score = raw.get('relevanceScore')
-    if type(score) not in (int, float) or not math.isfinite(score) or not 0 <= score <= 100:
+    if type(score) not in (int, float) or not 0 <= score <= 100:
         raise AnalysisError('模型相关性评分无效')
     evidence = raw.get('evidence')
     if not isinstance(evidence, list) or not 1 <= len(evidence) <= 2:
@@ -248,7 +247,7 @@ def validate_analysis(raw, documents):
     sources = {document['url']: document['text'] for document in documents}
     checked = []
     for entry in evidence:
-        if not isinstance(entry, dict) or entry.get('url') not in sources:
+        if not isinstance(entry, dict) or not isinstance(entry.get('url'), str) or entry['url'] not in sources:
             raise AnalysisError('模型证据链接不属于已读取文档')
         excerpt = entry.get('quote')
         if not isinstance(excerpt, str) or not 20 <= len(excerpt) <= 160 or excerpt not in sources[entry['url']]:
@@ -312,6 +311,24 @@ def load_cache(path, documents, now=None):
         return validate_analysis(raw['analysis'], documents)
     except (OSError, ValueError, TypeError, KeyError, AnalysisError):
         return None
+
+
+def prune_cache(cache_dir, now=None):
+    """Keep the action cache bounded; only remove our expired hash files."""
+    now = now or datetime.now(timezone.utc)
+    if not cache_dir.exists():
+        return
+    for path in cache_dir.glob('*.json'):
+        if not re.fullmatch(r'[a-f0-9]{64}\.json', path.name) or not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+            created = datetime.fromisoformat(payload['createdAt'])
+            if created.tzinfo is None or not 0 <= (now - created).total_seconds() < 7 * 86400:
+                path.unlink()
+        except (OSError, ValueError, TypeError, KeyError):
+            # Corrupt entries can be overwritten on a future matching lookup.
+            continue
 
 
 def analyze_project(project, profile, github_token, key, model, cache_dir, deadline):
@@ -429,6 +446,7 @@ def main(argv=None):
     projects = projects[:MAX_CANDIDATES]
     if not projects:
         raise AnalysisError('没有待分析项目')
+    prune_cache(args.cache_dir)
     deadline = Deadline()
     analyzed = []
     usage = {'prompt_tokens': 0, 'completion_tokens': 0}
@@ -440,7 +458,10 @@ def main(argv=None):
             analyzed.append(project)
             for field in usage:
                 usage[field] += counts[field]
-            print(f"Document analysis {len(analyzed)}/{len(projects)}: {project['llmAnalysis']['status']}")
+            report = project['llmAnalysis']
+            detail = ': ' + report['message'] if report['status'] == 'unavailable' else ''
+            print(f"Document analysis {len(analyzed)}/{len(projects)} "
+                  f"{project['title']}: {report['status']}{detail}")
     result, updated_state = finalize(data, analyzed, profile, state, model, usage)
     for destination, content in ((args.output, result), (args.state_output, updated_state)):
         destination.parent.mkdir(parents=True, exist_ok=True)

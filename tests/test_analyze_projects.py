@@ -3,7 +3,6 @@ from datetime import date, datetime, timedelta, timezone
 import importlib.util
 import json
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -121,7 +120,8 @@ class AnalyzeProjectTests(unittest.TestCase):
         cases = [model_result(evidence=[{'url': 'https://evil.invalid', 'quote': DOCS[0]['text']}]),
                  model_result(evidence=[{'url': DOCS[0]['url'], 'quote': 'Fabricated evidence that does not occur.'}]),
                  model_result(summary='已经实测，可立即使用。'), model_result(relevanceScore=float('nan')),
-                 model_result(eligible='true'), model_result(evidence=[])]
+                 model_result(eligible='true'), model_result(evidence=[]),
+                 model_result(evidence=[{'url': [], 'quote': 'malformed URL should not crash validation'}])]
         for raw in cases:
             with self.subTest(raw=raw), self.assertRaises(analyze.AnalysisError):
                 analyze.validate_analysis(raw, DOCS)
@@ -166,6 +166,21 @@ class AnalyzeProjectTests(unittest.TestCase):
             cached['analysis']['evidence'][0]['quote'] = 'fabricated quotation that must fail validation'
             path.write_text(json.dumps(cached), encoding='utf-8')
             self.assertIsNone(analyze.load_cache(path, DOCS, now))
+
+    def test_expired_cache_files_are_pruned_without_touching_unrelated_files(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cache = Path(folder)
+            now = datetime.now(timezone.utc)
+            old = cache / ('a' * 64 + '.json')
+            current = cache / ('b' * 64 + '.json')
+            unrelated = cache / 'keep.json'
+            old.write_text(json.dumps({'createdAt': (now - timedelta(days=8)).isoformat()}), encoding='utf-8')
+            current.write_text(json.dumps({'createdAt': now.isoformat()}), encoding='utf-8')
+            unrelated.write_text('user data', encoding='utf-8')
+            analyze.prune_cache(cache, now)
+            self.assertFalse(old.exists())
+            self.assertTrue(current.exists())
+            self.assertTrue(unrelated.exists())
 
     def test_cache_hit_avoids_paid_call_but_rechecks_actual_documents(self):
         with tempfile.TemporaryDirectory() as folder:
