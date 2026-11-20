@@ -206,6 +206,24 @@
     "nvidia/cuphoton": "2026-11-19",
     "siliconvalley4066/esp32tftoscilloscope": "2026-11-19",
     "siliconvalley4066/esp32oledoscilloscope": "2026-11-19",
-    "opencesium/cesium-skills": "2026-11-19"
+    "opencesium/cesium-skills": "2026-11-19",
+    "littlepyx/pi_zaya": "2026-11-20",
+    "spec-kitty/spec-kitty": "2026-11-20",
+    "kajisho5/ffmpeg-skill": "2026-11-20",
+    "ollygarden/opentelemetry-agent-skills": "2026-11-20",
+    "trina-app/trina-ax": "2026-11-20",
+    "openvinotoolkit/openvino": "2026-11-20",
+    "0xpd33/commonplace": "2026-11-20",
+    "arthurbrussee/brush": "2026-11-20",
+    "telekinesis-ai/telekinesis-examples": "2026-11-20",
+    "mind2act/mind2act_world": "2026-11-20",
+    "ioai-tech/rosview": "2026-11-20",
+    "rsasaki0109/rust_robotics": "2026-11-20",
+    "quandela/perceval": "2026-11-20",
+    "fastmachinelearning/hls4ml": "2026-11-20",
+    "zhoushoujianwork/easyeda-agent": "2026-11-20",
+    "yosyshq/nextpnr": "2026-11-20",
+    "enjoy-digital/usb3_pipe": "2026-11-20",
+    "bve/openosc": "2026-11-20"
   }
 }
